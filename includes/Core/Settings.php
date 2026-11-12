@@ -8,33 +8,66 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Панель настроек плагина Polylang Up на базе Settings API.
+ * Панель настроек плагина Polylang Divi 5 AI Auto-Translator & Same Slug.
  */
 final class Settings {
 
-    public const OPTION_NAME = 'plu_settings';
-    public const PAGE_SLUG   = 'polylang-up';
+    public const OPTION_NAME  = 'plu_settings';
+    public const PAGE_SLUG    = 'polylang-up';
     public const OPTION_GROUP = 'plu_settings_group';
 
     /**
-     * Регистрация хуков админ-панели.
+     * Значения по умолчанию для опций плагина.
+     *
+     * @param string $key Ключ опции.
+     * @return mixed Значение по умолчанию.
      */
-    public static function init(): void {
-        if ( ! is_admin() ) {
-            return;
-        }
+    public static function get_default( string $key ): mixed {
+        $defaults = [
+            'enable_same_slug'   => 1,
+            'default_translator' => 'gtx',
+            'gemini_api_key'     => '',
+            'gemini_model'       => 'gemini-2.5-flash',
+            'system_prompt'      => "Ты — профессиональный технический SEO-локализатор для корпоративного сайта. Переводи тексты точно по смыслу, сохраняя деловой и экспертный тон. СТРОГИЕ ПРАВИЛА: 1) Сохраняй все HTML-теги, шорткоды и переменные Rank Math (%sep%, %sitename%, %title%) без изменений. 2) При переводе на английский (EN) или другие латинские языки полностью исключай остаточную кириллицу как в видимом тексте, так и в атрибутах alt/title. 3) Соблюдай терминологию из глоссария ниже.",
+            'github_token'       => '',
+        ];
 
-        add_action( 'admin_menu', [ self::class, 'register_menu' ] );
-        add_action( 'admin_init', [ self::class, 'register_settings' ] );
+        return $defaults[ $key ] ?? '';
     }
 
     /**
-     * Добавление страницы плагина в меню «Настройки».
+     * Регистрация хуков админ-панели и AJAX.
+     */
+    public static function init(): void {
+        add_action( 'admin_menu', [ self::class, 'register_menu' ] );
+        add_action( 'admin_init', [ self::class, 'register_settings' ] );
+        add_action( 'admin_enqueue_scripts', [ self::class, 'enqueue_assets' ] );
+        add_action( 'wp_ajax_plu_test_api', [ self::class, 'ajax_test_api' ] );
+    }
+
+    /**
+     * Добавление страниц настроек в админ-меню WordPress.
+     * Пункт «Языки -> AI & Same Slug» (при наличии Polylang) и «Настройки -> Polylang AI Pro».
      */
     public static function register_menu(): void {
+        $is_polylang_active = function_exists( 'pll_current_language' ) || defined( 'POLYLANG_VERSION' );
+
+        // Добавляем в подменю Polylang, если активен
+        if ( $is_polylang_active ) {
+            add_submenu_page(
+                'mlang',
+                __( 'AI & Same Slug', 'polyland-up' ),
+                __( 'AI & Same Slug', 'polyland-up' ),
+                'manage_options',
+                self::PAGE_SLUG,
+                [ self::class, 'render_page' ]
+            );
+        }
+
+        // Фоллбэк/дублирование в меню «Настройки» для гарантированного доступа
         add_options_page(
-            __( 'Polylang Up', 'polylang-up' ),
-            __( 'Polylang Up', 'polylang-up' ),
+            __( 'Polylang AI Pro', 'polyland-up' ),
+            __( 'Polylang AI Pro', 'polyland-up' ),
             'manage_options',
             self::PAGE_SLUG,
             [ self::class, 'render_page' ]
@@ -42,7 +75,44 @@ final class Settings {
     }
 
     /**
-     * Регистрация настроек через Settings API.
+     * Подключение CSS и JS только на странице настроек плагина.
+     *
+     * @param string $hook Идентификатор текущего экрана.
+     */
+    public static function enqueue_assets( string $hook ): void {
+        $is_settings_page = isset( $_GET['page'] ) && self::PAGE_SLUG === $_GET['page'];
+
+        if ( ! $is_settings_page ) {
+            return;
+        }
+
+        wp_enqueue_style(
+            'plu-admin-css',
+            PLU_URL . 'assets/css/admin.css',
+            [],
+            PLU_VERSION
+        );
+
+        wp_enqueue_script(
+            'plu-admin-js',
+            PLU_URL . 'assets/js/admin.js',
+            [ 'jquery' ],
+            PLU_VERSION,
+            true
+        );
+
+        wp_localize_script(
+            'plu-admin-js',
+            'pluAdminData',
+            [
+                'ajax_url' => admin_url( 'admin-ajax.php' ),
+                'nonce'    => wp_create_nonce( 'plu_admin_nonce' ),
+            ]
+        );
+    }
+
+    /**
+     * Регистрация полей через Settings API.
      */
     public static function register_settings(): void {
         register_setting(
@@ -55,28 +125,95 @@ final class Settings {
             ]
         );
 
-        // Секция основных настроек
+        // 1. Секция URL и Same Slug
         add_settings_section(
-            'plu_section_general',
-            __( 'Параметры интеграции и обновлений', 'polylang-up' ),
-            [ self::class, 'render_general_section_intro' ],
+            'plu_section_slug',
+            __( 'Маршрутизация и структура URL', 'polyland-up' ),
+            [ self::class, 'render_slug_section_intro' ],
             self::PAGE_SLUG
         );
 
-        // Поле GitHub Token
+        add_settings_field(
+            'enable_same_slug',
+            __( 'Одинаковые URL-слаги (Same Slug)', 'polyland-up' ),
+            [ self::class, 'render_field_enable_same_slug' ],
+            self::PAGE_SLUG,
+            'plu_section_slug'
+        );
+
+        // 2. Секция Движка перевода и AI
+        add_settings_section(
+            'plu_section_ai',
+            __( 'Движок перевода и AI Studio', 'polyland-up' ),
+            [ self::class, 'render_ai_section_intro' ],
+            self::PAGE_SLUG
+        );
+
+        add_settings_field(
+            'default_translator',
+            __( 'Движок перевода по умолчанию', 'polyland-up' ),
+            [ self::class, 'render_field_default_translator' ],
+            self::PAGE_SLUG,
+            'plu_section_ai'
+        );
+
+        add_settings_field(
+            'gemini_api_key',
+            __( 'Gemini API Key (AI Studio)', 'polyland-up' ),
+            [ self::class, 'render_field_gemini_api_key' ],
+            self::PAGE_SLUG,
+            'plu_section_ai',
+            [ 'class' => 'plu-gemini-field' ]
+        );
+
+        add_settings_field(
+            'gemini_model',
+            __( 'Модель Gemini', 'polyland-up' ),
+            [ self::class, 'render_field_gemini_model' ],
+            self::PAGE_SLUG,
+            'plu_section_ai',
+            [ 'class' => 'plu-gemini-field' ]
+        );
+
+        add_settings_field(
+            'system_prompt',
+            __( 'Системный промпт и Глоссарий', 'polyland-up' ),
+            [ self::class, 'render_field_system_prompt' ],
+            self::PAGE_SLUG,
+            'plu_section_ai',
+            [ 'class' => 'plu-gemini-field' ]
+        );
+
+        // Поле проверки подключения к API
+        add_settings_field(
+            'api_connection_test',
+            __( 'Тестирование API', 'polyland-up' ),
+            [ self::class, 'render_field_api_test' ],
+            self::PAGE_SLUG,
+            'plu_section_ai'
+        );
+
+        // 3. Секция автономных обновлений
+        add_settings_section(
+            'plu_section_updater',
+            __( 'Автономное обновление с GitHub', 'polyland-up' ),
+            [ self::class, 'render_updater_section_intro' ],
+            self::PAGE_SLUG
+        );
+
         add_settings_field(
             'github_token',
-            __( 'GitHub Personal Access Token', 'polylang-up' ),
+            __( 'GitHub Access Token', 'polyland-up' ),
             [ self::class, 'render_field_github_token' ],
             self::PAGE_SLUG,
-            'plu_section_general'
+            'plu_section_updater'
         );
     }
 
     /**
-     * Валидация и санитизация входящих данных формы.
+     * Валидация и санитизация входящих параметров формы.
      *
-     * @param mixed $input Сырые данные из формы.
+     * @param mixed $input Входящие данные.
      * @return array<string, mixed> Очищенные данные.
      */
     public static function sanitize( mixed $input ): array {
@@ -86,28 +223,153 @@ final class Settings {
 
         $sanitized = [];
 
-        // Санитизация GitHub токена
-        if ( isset( $input['github_token'] ) ) {
-            $raw_token = trim( (string) $input['github_token'] );
-            // Сохраняем только валидные символы токена GitHub (classic ghp_... или fine-grained github_pat_...)
-            $sanitized['github_token'] = preg_replace( '/[^A-Za-z0-9_]/', '', $raw_token ) ?? '';
-        } else {
-            $sanitized['github_token'] = '';
-        }
+        // Checkbox Same Slug
+        $sanitized['enable_same_slug'] = ! empty( $input['enable_same_slug'] ) ? 1 : 0;
+
+        // Translator select
+        $translator = sanitize_key( (string) ( $input['default_translator'] ?? 'gtx' ) );
+        $sanitized['default_translator'] = in_array( $translator, [ 'gtx', 'gemini' ], true ) ? $translator : 'gtx';
+
+        // Gemini API Key
+        $sanitized['gemini_api_key'] = sanitize_text_field( trim( (string) ( $input['gemini_api_key'] ?? '' ) ) );
+
+        // Gemini Model
+        $model = sanitize_text_field( trim( (string) ( $input['gemini_model'] ?? 'gemini-2.5-flash' ) ) );
+        $sanitized['gemini_model'] = '' !== $model ? $model : 'gemini-2.5-flash';
+
+        // System Prompt
+        $prompt = sanitize_textarea_field( (string) ( $input['system_prompt'] ?? '' ) );
+        $sanitized['system_prompt'] = '' !== trim( $prompt ) ? $prompt : self::get_default( 'system_prompt' );
+
+        // GitHub Token
+        $raw_token = trim( (string) ( $input['github_token'] ?? '' ) );
+        $sanitized['github_token'] = preg_replace( '/[^A-Za-z0-9_]/', '', $raw_token ) ?? '';
 
         return $sanitized;
     }
 
-    /**
-     * Описание секции основных настроек.
-     */
-    public static function render_general_section_intro(): void {
-        echo '<p class="description">' . esc_html__( 'Базовые параметры взаимодействия плагина с удаленным репозиторием и WordPress.', 'polylang-up' ) . '</p>';
+    public static function render_slug_section_intro(): void {
+        echo '<p class="description">' . esc_html__( 'Управление структурой постоянных ссылок (Permalinks) и слагов страниц.', 'polyland-up' ) . '</p>';
     }
 
-    /**
-     * Рендер поля github_token.
-     */
+    public static function render_ai_section_intro(): void {
+        echo '<p class="description">' . esc_html__( 'Настройка интеграции с бесплатным Google Translate и нейросетевым Gemini API для качественной локализации.', 'polyland-up' ) . '</p>';
+    }
+
+    public static function render_updater_section_intro(): void {
+        echo '<p class="description">' . esc_html__( 'Интеграция с GitHub для проверки и установки обновлений напрямую из репозитория piratexnik/Polyland-Up.', 'polyland-up' ) . '</p>';
+    }
+
+    public static function render_field_enable_same_slug(): void {
+        $value = (int) plu_get_option( 'enable_same_slug', self::get_default( 'enable_same_slug' ) );
+        ?>
+        <label for="plu_enable_same_slug">
+            <input
+                type="checkbox"
+                name="<?php echo esc_attr( self::OPTION_NAME ); ?>[enable_same_slug]"
+                id="plu_enable_same_slug"
+                value="1"
+                <?php checked( 1, $value ); ?>
+            />
+            <?php esc_html_e( 'Разрешить одинаковые URL-слаги (Same Slug) между языками', 'polyland-up' ); ?>
+        </label>
+        <p class="description">
+            <?php esc_html_e( 'Позволяет страницам на разных языках иметь идентичный URL-slug (например, site.com/en/about/ и site.com/ru/about/).', 'polyland-up' ); ?>
+        </p>
+        <?php
+    }
+
+    public static function render_field_default_translator(): void {
+        $selected = (string) plu_get_option( 'default_translator', self::get_default( 'default_translator' ) );
+        ?>
+        <select name="<?php echo esc_attr( self::OPTION_NAME ); ?>[default_translator]" id="plu_default_translator">
+            <option value="gtx" <?php selected( 'gtx', $selected ); ?>>
+                <?php esc_html_e( 'Google Translate (Free GTX)', 'polyland-up' ); ?>
+            </option>
+            <option value="gemini" <?php selected( 'gemini', $selected ); ?>>
+                <?php esc_html_e( 'Google Gemini API (AI Studio)', 'polyland-up' ); ?>
+            </option>
+        </select>
+        <p class="description">
+            <?php esc_html_e( 'Выберите движок, который будет использоваться для пакетного и метабокс-перевода.', 'polyland-up' ); ?>
+        </p>
+        <?php
+    }
+
+    public static function render_field_gemini_api_key(): void {
+        $key = (string) plu_get_option( 'gemini_api_key', '' );
+        ?>
+        <input
+            type="password"
+            name="<?php echo esc_attr( self::OPTION_NAME ); ?>[gemini_api_key]"
+            id="plu_gemini_api_key"
+            value="<?php echo esc_attr( $key ); ?>"
+            class="regular-text"
+            autocomplete="new-password"
+        />
+        <p class="description">
+            <?php
+            printf(
+                __( 'Бесплатный ключ можно сгенерировать в <a href="%s" target="_blank" rel="noopener noreferrer">Google AI Studio</a>.', 'polyland-up' ),
+                esc_url( 'https://aistudio.google.com/app/apikey' )
+            );
+            ?>
+        </p>
+        <?php
+    }
+
+    public static function render_field_gemini_model(): void {
+        $model = (string) plu_get_option( 'gemini_model', self::get_default( 'gemini_model' ) );
+        ?>
+        <input
+            type="text"
+            name="<?php echo esc_attr( self::OPTION_NAME ); ?>[gemini_model]"
+            id="plu_gemini_model"
+            list="plu-gemini-models"
+            value="<?php echo esc_attr( $model ); ?>"
+            class="regular-text"
+        />
+        <datalist id="plu-gemini-models">
+            <option value="gemini-2.5-flash"></option>
+            <option value="gemini-2.5-pro"></option>
+            <option value="gemini-2.0-flash"></option>
+        </datalist>
+        <p class="description">
+            <?php esc_html_e( 'Выберите модель из списка или введите любое кастомное имя модели Google Gemini.', 'polyland-up' ); ?>
+        </p>
+        <?php
+    }
+
+    public static function render_field_system_prompt(): void {
+        $prompt = (string) plu_get_option( 'system_prompt', self::get_default( 'system_prompt' ) );
+        ?>
+        <textarea
+            name="<?php echo esc_attr( self::OPTION_NAME ); ?>[system_prompt]"
+            id="plu_system_prompt"
+            rows="8"
+            class="large-text"
+        ><?php echo esc_textarea( $prompt ); ?></textarea>
+        <p class="description">
+            <?php esc_html_e( 'Инструкция для модели Gemini при переводе контента, шорткодов Divi 5 и переменных Rank Math SEO.', 'polyland-up' ); ?>
+        </p>
+        <?php
+    }
+
+    public static function render_field_api_test(): void {
+        ?>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <button type="button" class="button button-secondary" id="plu-btn-test-api">
+                <?php esc_html_e( '🔌 Проверить соединение с API', 'polyland-up' ); ?>
+            </button>
+            <span class="spinner" id="plu-api-test-spinner" style="float: none; margin: 0;"></span>
+        </div>
+        <p class="description">
+            <?php esc_html_e( 'Тестирует текущие введенные параметры переводчика (даже без предварительного сохранения настроек).', 'polyland-up' ); ?>
+        </p>
+        <div id="plu-api-test-result"></div>
+        <?php
+    }
+
     public static function render_field_github_token(): void {
         $token = (string) plu_get_option( 'github_token', '' );
         ?>
@@ -120,55 +382,283 @@ final class Settings {
             autocomplete="new-password"
         />
         <p class="description">
-            <?php esc_html_e( 'Опционально. Укажите GitHub Personal Access Token, если репозиторий приватный.', 'polylang-up' ); ?>
+            <?php esc_html_e( 'Опционально. Укажите GitHub Personal Access Token, если репозиторий piratexnik/Polyland-Up является приватным.', 'polyland-up' ); ?>
         </p>
         <?php
     }
 
     /**
-     * Отрисовка страницы настроек с вкладками и статусом Polylang.
+     * AJAX-обработчик тестирования соединения с API перевода.
+     */
+    public static function ajax_test_api(): void {
+        check_ajax_referer( 'plu_admin_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [
+                'message' => esc_html__( 'У вас недостаточно прав для выполнения этого действия.', 'polyland-up' ),
+            ] );
+        }
+
+        $translator = sanitize_key( (string) ( $_POST['translator'] ?? 'gtx' ) );
+        $api_key    = sanitize_text_field( wp_unslash( (string) ( $_POST['api_key'] ?? '' ) ) );
+        $model      = sanitize_text_field( wp_unslash( (string) ( $_POST['model'] ?? 'gemini-2.5-flash' ) ) );
+
+        if ( '' === $model ) {
+            $model = 'gemini-2.5-flash';
+        }
+
+        if ( 'gtx' === $translator ) {
+            self::test_gtx_api();
+        } elseif ( 'gemini' === $translator ) {
+            self::test_gemini_api( $api_key, $model );
+        } else {
+            wp_send_json_error( [
+                'message' => esc_html__( 'Неизвестный тип переводчика.', 'polyland-up' ),
+            ] );
+        }
+    }
+
+    /**
+     * Тестирование Google Translate GTX.
+     */
+    private static function test_gtx_api(): void {
+        $test_phrase = 'Connection successful';
+        $url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=' . rawurlencode( $test_phrase );
+
+        $start = microtime( true );
+        $response = wp_remote_get( $url, [
+            'timeout'    => 10,
+            'user-agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ] );
+        $elapsed = (int) round( ( microtime( true ) - $start ) * 1000 );
+
+        if ( is_wp_error( $response ) ) {
+            wp_send_json_error( [
+                'message' => sprintf(
+                    esc_html__( 'Сетевая ошибка при запросе к Google GTX: %s', 'polyland-up' ),
+                    $response->get_error_message()
+                ),
+                'time_ms' => $elapsed,
+            ] );
+        }
+
+        $code = (int) wp_remote_retrieve_response_code( $response );
+        if ( 200 !== $code ) {
+            wp_send_json_error( [
+                'message' => sprintf(
+                    esc_html__( 'Google Translate GTX вернул HTTP статус %d.', 'polyland-up' ),
+                    $code
+                ),
+                'time_ms' => $elapsed,
+            ] );
+        }
+
+        $body = wp_remote_retrieve_body( $response );
+        $data = json_decode( $body, true );
+
+        $translated = '';
+        if ( is_array( $data ) && isset( $data[0][0][0] ) && is_string( $data[0][0][0] ) ) {
+            $translated = $data[0][0][0];
+        }
+
+        if ( '' === $translated ) {
+            $translated = 'Успешное подключение';
+        }
+
+        wp_send_json_success( [
+            'engine'     => 'Google Translate (Free GTX)',
+            'translated' => $translated,
+            'time_ms'    => $elapsed,
+            'message'    => sprintf(
+                esc_html__( 'Соединение успешно установлено! Ответ получен за %d мс.', 'polyland-up' ),
+                $elapsed
+            ),
+        ] );
+    }
+
+    /**
+     * Тестирование Google Gemini API.
+     *
+     * @param string $api_key Ключ Google AI Studio.
+     * @param string $model   Имя модели.
+     */
+    private static function test_gemini_api( string $api_key, string $model ): void {
+        // Если ключ не передан в форме, проверяем сохраненный в БД
+        if ( '' === $api_key ) {
+            $api_key = (string) plu_get_option( 'gemini_api_key', '' );
+        }
+
+        if ( '' === $api_key ) {
+            wp_send_json_error( [
+                'message' => esc_html__( 'API-ключ Gemini не указан. Введите ключ Google AI Studio в поле выше.', 'polyland-up' ),
+            ] );
+        }
+
+        $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( $model ) . ':generateContent?key=' . rawurlencode( $api_key );
+
+        $payload = [
+            'contents' => [
+                [
+                    'parts' => [
+                        [
+                            'text' => 'Translate "Connection successful" to Russian in JSON: {"result": "..."}',
+                        ],
+                    ],
+                ],
+            ],
+            'generationConfig' => [
+                'response_mime_type' => 'application/json',
+                'temperature'        => 0.1,
+            ],
+        ];
+
+        $start = microtime( true );
+        $response = wp_remote_post( $url, [
+            'timeout' => 15,
+            'headers' => [
+                'Content-Type' => 'application/json',
+            ],
+            'body'    => wp_json_encode( $payload ),
+        ] );
+        $elapsed = (int) round( ( microtime( true ) - $start ) * 1000 );
+
+        if ( is_wp_error( $response ) ) {
+            wp_send_json_error( [
+                'message' => sprintf(
+                    esc_html__( 'Сетевая ошибка при запросе к Gemini API: %s', 'polyland-up' ),
+                    $response->get_error_message()
+                ),
+                'time_ms' => $elapsed,
+            ] );
+        }
+
+        $code = (int) wp_remote_retrieve_response_code( $response );
+        $body = (string) wp_remote_retrieve_body( $response );
+        $data = json_decode( $body, true );
+
+        if ( 200 === $code && is_array( $data ) ) {
+            $text = $data['candidates'][0]['content']['parts'][0]['text'] ?? '';
+            $parsed = is_string( $text ) ? json_decode( $text, true ) : null;
+            $translated = ( is_array( $parsed ) && isset( $parsed['result'] ) ) ? (string) $parsed['result'] : trim( (string) $text );
+
+            if ( '' === $translated ) {
+                $translated = 'Успешное подключение';
+            }
+
+            wp_send_json_success( [
+                'engine'     => 'Google Gemini API',
+                'model'      => $model,
+                'translated' => $translated,
+                'time_ms'    => $elapsed,
+                'message'    => sprintf(
+                    esc_html__( 'Модель %s успешно ответила за %d мс.', 'polyland-up' ),
+                    esc_html( $model ),
+                    $elapsed
+                ),
+            ] );
+        }
+
+        // Обработка ошибок Google API
+        $error_message = $data['error']['message'] ?? '';
+        $error_status  = $data['error']['status'] ?? '';
+
+        if ( 400 === $code ) {
+            $desc = sprintf(
+                esc_html__( 'Некорректный запрос (HTTP 400): %s', 'polyland-up' ),
+                esc_html( $error_message ?: 'Проверьте структуру запроса или имя модели.' )
+            );
+        } elseif ( 403 === $code || 'PERMISSION_DENIED' === $error_status ) {
+            $desc = sprintf(
+                esc_html__( 'Ошибка доступа (HTTP 403): Неверный API-ключ или доступ к модели %s ограничен. Детали: %s', 'polyland-up' ),
+                esc_html( $model ),
+                esc_html( $error_message )
+            );
+        } elseif ( 404 === $code || 'NOT_FOUND' === $error_status ) {
+            $desc = sprintf(
+                esc_html__( 'Модель не найдена (HTTP 404): Модель "%s" не поддерживается в v1beta API. Выберите gemini-2.5-flash или gemini-2.0-flash.', 'polyland-up' ),
+                esc_html( $model )
+            );
+        } elseif ( 429 === $code || 'RESOURCE_EXHAUSTED' === $error_status ) {
+            $desc = sprintf(
+                esc_html__( 'Превышен лимит запросов (HTTP 429): %s', 'polyland-up' ),
+                esc_html( $error_message )
+            );
+        } else {
+            $desc = sprintf(
+                esc_html__( 'Ошибка Gemini API (HTTP %d): %s', 'polyland-up' ),
+                $code,
+                esc_html( $error_message ?: 'Неизвестный сбой.' )
+            );
+        }
+
+        wp_send_json_error( [
+            'message' => $desc,
+            'time_ms' => $elapsed,
+        ] );
+    }
+
+    /**
+     * Отрисовка страницы настроек со статус-баром и формой.
      */
     public static function render_page(): void {
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_die( esc_html__( 'У вас недостаточно прав для доступа к этой странице.', 'polylang-up' ) );
+            wp_die( esc_html__( 'У вас недостаточно прав для доступа к этой странице.', 'polyland-up' ) );
         }
 
-        // Поддержка переключения вкладок
         $active_tab = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'general';
         $tabs = [
-            'general' => __( 'Основные', 'polylang-up' ),
+            'general' => __( 'Основные', 'polyland-up' ),
         ];
 
-        $is_polylang_active = defined( 'POLYLANG_VERSION' );
-        $polylang_version   = $is_polylang_active ? POLYLANG_VERSION : '';
+        // Статус Polylang
+        $is_polylang_active = function_exists( 'pll_current_language' ) || defined( 'POLYLANG_VERSION' );
+        $polylang_version   = defined( 'POLYLANG_VERSION' ) ? POLYLANG_VERSION : ( $is_polylang_active ? 'active' : '' );
+
+        // Статус Rank Math SEO
+        $is_rankmath_active = defined( 'RANK_MATH_VERSION' );
+        $rankmath_version   = $is_rankmath_active ? RANK_MATH_VERSION : '';
         ?>
         <div class="wrap plu-settings-wrap">
             <h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
 
-            <!-- Индикатор статуса Polylang -->
-            <div class="plu-status-bar" style="margin: 15px 0 20px; padding: 12px 16px; background: #fff; border-left: 4px solid <?php echo $is_polylang_active ? '#00a32a' : '#dba617'; ?>; box-shadow: 0 1px 1px rgba(0,0,0,.04); border-radius: 2px;">
-                <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <div>
-                        <strong><?php esc_html_e( 'Статус Polylang:', 'polylang-up' ); ?></strong>
+            <!-- Статус-бар окружения -->
+            <div class="plu-status-bar">
+                <div class="plu-status-items">
+                    <!-- Polylang -->
+                    <div class="plu-status-item">
+                        <strong><?php esc_html_e( 'Polylang:', 'polyland-up' ); ?></strong>
                         <?php if ( $is_polylang_active ) : ?>
-                            <span style="display: inline-block; margin-left: 8px; padding: 3px 8px; background: #edfaef; color: #1a7a28; border-radius: 3px; font-weight: 600; font-size: 13px;">
-                                &#10003; <?php printf( esc_html__( 'Активен (v%s)', 'polylang-up' ), esc_html( $polylang_version ) ); ?>
+                            <span class="plu-badge plu-badge-success">
+                                &#10003; <?php printf( esc_html__( 'Активен (%s)', 'polyland-up' ), esc_html( $polylang_version ) ); ?>
                             </span>
                         <?php else : ?>
-                            <span style="display: inline-block; margin-left: 8px; padding: 3px 8px; background: #fcf9e8; color: #996800; border-radius: 3px; font-weight: 600; font-size: 13px;">
-                                &#9888; <?php esc_html_e( 'Плагин Polylang не активен или не установлен. Для полной функциональности активируйте Polylang.', 'polylang-up' ); ?>
+                            <span class="plu-badge plu-badge-warning">
+                                &#9888; <?php esc_html_e( 'Не активен', 'polyland-up' ); ?>
                             </span>
                         <?php endif; ?>
                     </div>
-                    <div>
-                        <span style="color: #646970; font-size: 12px;">
-                            <?php printf( esc_html__( 'Polylang Up v%s', 'polylang-up' ), esc_html( PLU_VERSION ) ); ?>
-                        </span>
+
+                    <!-- Rank Math -->
+                    <div class="plu-status-item">
+                        <strong><?php esc_html_e( 'Rank Math SEO:', 'polyland-up' ); ?></strong>
+                        <?php if ( $is_rankmath_active ) : ?>
+                            <span class="plu-badge plu-badge-success">
+                                &#10003; <?php printf( esc_html__( 'Активен (v%s)', 'polyland-up' ), esc_html( $rankmath_version ) ); ?>
+                            </span>
+                        <?php else : ?>
+                            <span class="plu-badge plu-badge-neutral">
+                                &#9675; <?php esc_html_e( 'Не активен', 'polyland-up' ); ?>
+                            </span>
+                        <?php endif; ?>
                     </div>
+                </div>
+
+                <div class="plu-version-info">
+                    <?php printf( esc_html__( 'Версия плагина: v%s', 'polyland-up' ), esc_html( PLU_VERSION ) ); ?>
                 </div>
             </div>
 
-            <!-- Навигация по вкладкам -->
+            <!-- Вкладки настроек -->
             <nav class="nav-tab-wrapper wp-clearfix">
                 <?php foreach ( $tabs as $tab_key => $tab_title ) : ?>
                     <a
@@ -186,7 +676,7 @@ final class Settings {
                         <?php
                         settings_fields( self::OPTION_GROUP );
                         do_settings_sections( self::PAGE_SLUG );
-                        submit_button( __( 'Сохранить изменения', 'polylang-up' ) );
+                        submit_button( __( 'Сохранить изменения', 'polyland-up' ) );
                         ?>
                     </form>
                 <?php endif; ?>

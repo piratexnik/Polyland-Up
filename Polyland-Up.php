@@ -1,14 +1,14 @@
 <?php
 /**
- * Plugin Name:       Polylang Up
- * Plugin URI:        https://github.com/piratexnik/polylang-up
- * Description:       Расширение возможностей Polylang для WordPress и Divi 5: управление локализацией, синхронизация контента и совместимость со страничным кешированием.
+ * Plugin Name:       Polylang Divi 5 AI Auto-Translator & Same Slug
+ * Plugin URI:        https://github.com/piratexnik/Polyland-Up
+ * Description:       Автоматический переводчик для Divi 5 и Polylang с поддержкой одинаковых слагов (Same Slug), Google Translate и Gemini AI.
  * Version:           1.0
  * Requires at least: 6.5
  * Requires PHP:      8.1
  * Author:            piratexnik
  * Author URI:        https://github.com/piratexnik
- * Text Domain:       polylang-up
+ * Text Domain:       polyland-up
  * Domain Path:       /languages
  */
 
@@ -62,7 +62,15 @@ function plu_get_option( string $key, mixed $default = '', bool $reset = false )
         return null;
     }
 
-    return $options[ $key ] ?? $default;
+    if ( array_key_exists( $key, $options ) ) {
+        return $options[ $key ];
+    }
+
+    if ( '' === $default && class_exists( \PolylangUp\Core\Settings::class ) ) {
+        return \PolylangUp\Core\Settings::get_default( $key );
+    }
+
+    return $default;
 }
 
 // Сброс статического кеша при обновлении настроек

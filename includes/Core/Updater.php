@@ -13,8 +13,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class Updater {
 
     public const REPO_OWNER      = 'piratexnik';
-    public const REPO_NAME       = 'polylang-up';
-    public const REPO_FULL       = 'piratexnik/polylang-up';
+    public const REPO_NAME       = 'Polyland-Up';
+    public const REPO_FULL       = 'piratexnik/Polyland-Up';
+    public const MAIN_FILE       = 'Polyland-Up.php';
+    public const PLUGIN_SLUG     = 'Polyland-Up';
     public const TRANSIENT_CHECK = 'plu_github_update_check';
     public const TRANSIENT_ERROR = 'plu_github_update_error';
 
@@ -74,7 +76,7 @@ final class Updater {
             }
         }
 
-        $url = 'https://raw.githubusercontent.com/' . self::REPO_FULL . '/main/polylang-up.php?t=' . time();
+        $url = 'https://raw.githubusercontent.com/' . self::REPO_FULL . '/main/' . self::MAIN_FILE . '?t=' . time();
 
         $args = [
             'timeout'    => 10,
@@ -136,17 +138,22 @@ final class Updater {
             return $args;
         }
 
+        $is_repo_request = false;
         if (
-            str_contains( $url, 'api.github.com/repos/' . self::REPO_FULL ) ||
-            str_contains( $url, 'github.com/' . self::REPO_FULL ) ||
-            str_contains( $url, 'raw.githubusercontent.com/' . self::REPO_FULL )
+            stripos( $url, 'api.github.com/repos/' . self::REPO_FULL ) !== false ||
+            stripos( $url, 'github.com/' . self::REPO_FULL ) !== false ||
+            stripos( $url, 'raw.githubusercontent.com/' . self::REPO_FULL ) !== false
         ) {
+            $is_repo_request = true;
+        }
+
+        if ( $is_repo_request ) {
             if ( ! isset( $args['headers'] ) || ! is_array( $args['headers'] ) ) {
                 $args['headers'] = [];
             }
             $args['headers']['Authorization'] = 'Bearer ' . $token;
 
-            if ( str_contains( $url, 'api.github.com' ) ) {
+            if ( stripos( $url, 'api.github.com' ) !== false ) {
                 $args['headers']['Accept'] = 'application/vnd.github+json';
             }
         }
@@ -167,7 +174,7 @@ final class Updater {
 
         $local_version = self::get_local_version();
 
-        // Аккуратно дополняем checked
+        // Аккуратно дополняем checked, сохраняя чужие плагины
         if ( ! isset( $transient->checked ) || ! is_array( $transient->checked ) ) {
             $transient->checked = [];
         }
@@ -178,7 +185,7 @@ final class Updater {
         if ( $remote_version && version_compare( $remote_version, $local_version, '>' ) ) {
             $update_item = new \stdClass();
             $update_item->id            = self::REPO_FULL;
-            $update_item->slug          = 'polylang-up';
+            $update_item->slug          = self::PLUGIN_SLUG;
             $update_item->plugin        = PLU_BASENAME;
             $update_item->new_version   = $remote_version;
             $update_item->url           = 'https://github.com/' . self::REPO_FULL;
@@ -202,7 +209,7 @@ final class Updater {
 
             $no_update = new \stdClass();
             $no_update->id           = self::REPO_FULL;
-            $no_update->slug         = 'polylang-up';
+            $no_update->slug         = self::PLUGIN_SLUG;
             $no_update->plugin       = PLU_BASENAME;
             $no_update->new_version  = $local_version;
             $no_update->url          = 'https://github.com/' . self::REPO_FULL;
@@ -245,7 +252,7 @@ final class Updater {
     }
 
     /**
-     * Корректировка директории после распаковки архива GitHub в правильный slug "polylang-up".
+     * Корректировка директории после распаковки архива GitHub в правильный slug "Polyland-Up".
      *
      * @param string      $source        Текущий путь распакованной папки.
      * @param string      $remote_source Базовая временная директория распаковки.
@@ -259,7 +266,7 @@ final class Updater {
         $is_our_plugin = false;
         if ( is_array( $hook_extra ) && isset( $hook_extra['plugin'] ) && $hook_extra['plugin'] === PLU_BASENAME ) {
             $is_our_plugin = true;
-        } elseif ( false !== strpos( $source, 'polylang-up' ) ) {
+        } elseif ( stripos( $source, self::PLUGIN_SLUG ) !== false ) {
             $is_our_plugin = true;
         }
 
@@ -267,7 +274,7 @@ final class Updater {
             return $source;
         }
 
-        $corrected_source = trailingslashit( $remote_source ) . 'polylang-up/';
+        $corrected_source = trailingslashit( $remote_source ) . self::PLUGIN_SLUG . '/';
 
         if ( $source === $corrected_source ) {
             return $source;
@@ -294,15 +301,15 @@ final class Updater {
      * @return mixed
      */
     public static function plugin_info( mixed $res, string $action, object $args ): mixed {
-        if ( 'plugin_information' !== $action || ! isset( $args->slug ) || 'polylang-up' !== $args->slug ) {
+        if ( 'plugin_information' !== $action || ! isset( $args->slug ) || self::PLUGIN_SLUG !== $args->slug ) {
             return $res;
         }
 
         $remote_version = self::get_remote_version() ?: self::get_local_version();
 
         $info = new \stdClass();
-        $info->name           = 'Polylang Up';
-        $info->slug           = 'polylang-up';
+        $info->name           = 'Polylang Divi 5 AI Auto-Translator & Same Slug';
+        $info->slug           = self::PLUGIN_SLUG;
         $info->version        = $remote_version;
         $info->author         = '<a href="https://github.com/' . self::REPO_OWNER . '">piratexnik</a>';
         $info->author_profile = 'https://github.com/' . self::REPO_OWNER;
@@ -311,9 +318,9 @@ final class Updater {
         $info->requires_php   = '8.1';
         $info->download_link  = self::get_download_package( $remote_version );
         $info->sections       = [
-            'description' => esc_html__( 'Расширение возможностей Polylang для WordPress и Divi 5: управление локализацией, синхронизация контента и совместимость со страничным кешированием.', 'polylang-up' ),
+            'description' => esc_html__( 'Автоматический переводчик для Divi 5 и Polylang с поддержкой одинаковых слагов (Same Slug), Google Translate и Gemini AI.', 'polyland-up' ),
             'changelog'   => sprintf(
-                __( 'Посетите <a href="%s" target="_blank">GitHub Releases</a> для просмотра полной истории версий и изменений.', 'polylang-up' ),
+                __( 'Посетите <a href="%s" target="_blank">GitHub Releases</a> для просмотра полной истории версий и изменений.', 'polyland-up' ),
                 esc_url( 'https://github.com/' . self::REPO_FULL . '/releases' )
             ),
         ];
@@ -337,7 +344,7 @@ final class Updater {
             $links[] = sprintf(
                 '<a href="%s" style="color:#00a32a;font-weight:600;">%s</a>',
                 esc_url( $check_url ),
-                esc_html__( '🔄 Проверить обновления', 'polylang-up' )
+                esc_html__( '🔄 Проверить обновления', 'polyland-up' )
             );
         }
 
@@ -353,7 +360,7 @@ final class Updater {
         }
 
         if ( ! current_user_can( 'update_plugins' ) ) {
-            wp_die( esc_html__( 'У вас недостаточно прав для выполнения этого действия.', 'polylang-up' ) );
+            wp_die( esc_html__( 'У вас недостаточно прав для выполнения этого действия.', 'polyland-up' ) );
         }
 
         check_admin_referer( 'plu_force_check_update' );
@@ -402,20 +409,20 @@ final class Updater {
         if ( 'latest' === $status ) {
             $version_display = $local_ver ?: self::get_local_version();
             $message = sprintf(
-                esc_html__( 'Polylang Up: У вас установлена актуальная версия (v%s).', 'polylang-up' ),
+                esc_html__( 'Polylang Up: У вас установлена актуальная версия (v%s).', 'polyland-up' ),
                 esc_html( $version_display )
             );
             printf( '<div class="notice notice-success is-dismissible"><p>%s</p></div>', $message );
         } elseif ( 'available' === $status ) {
             $local_display = $local_ver ?: self::get_local_version();
             $message = sprintf(
-                esc_html__( 'Polylang Up: Доступна новая версия v%s (текущая v%s). Обновите плагин ниже.', 'polylang-up' ),
+                esc_html__( 'Polylang Up: Доступна новая версия v%s (текущая v%s). Обновите плагин ниже.', 'polyland-up' ),
                 esc_html( $remote_ver ),
                 esc_html( $local_display )
             );
             printf( '<div class="notice notice-warning is-dismissible"><p>%s</p></div>', $message );
         } elseif ( 'error' === $status ) {
-            $message = esc_html__( 'Polylang Up: Не удалось проверить обновления на GitHub (проверьте соединение или токен).', 'polylang-up' );
+            $message = esc_html__( 'Polylang Up: Не удалось проверить обновления на GitHub (проверьте соединение или токен).', 'polyland-up' );
             printf( '<div class="notice notice-error is-dismissible"><p>%s</p></div>', $message );
         }
     }
