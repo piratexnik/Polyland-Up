@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace PolylangUp\Core;
 
+use PolylangUp\Modules\SameSlug;
+
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
@@ -24,5 +26,8 @@ final class Init {
             Settings::init();
             Updater::init();
         }
+
+        // Модуль одинаковых слагов работает как в админке, так и на фронтенде
+        SameSlug::init();
     }
 }
