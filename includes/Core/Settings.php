@@ -43,6 +43,23 @@ final class Settings {
         add_action( 'admin_init', [ self::class, 'register_settings' ] );
         add_action( 'admin_enqueue_scripts', [ self::class, 'enqueue_assets' ] );
         add_action( 'wp_ajax_plu_test_api', [ self::class, 'ajax_test_api' ] );
+        add_filter( 'plugin_action_links_' . PLU_BASENAME, [ self::class, 'add_action_links' ] );
+    }
+
+    /**
+     * Добавление ссылки «Настройки» в список плагинов.
+     *
+     * @param array<string> $links Ссылки действий плагина.
+     * @return array<string>
+     */
+    public static function add_action_links( array $links ): array {
+        $settings_link = sprintf(
+            '<a href="%s">%s</a>',
+            esc_url( admin_url( 'options-general.php?page=' . self::PAGE_SLUG ) ),
+            esc_html__( 'Настройки', 'polyland-up' )
+        );
+        array_unshift( $links, $settings_link );
+        return $links;
     }
 
     /**

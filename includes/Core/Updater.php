@@ -86,15 +86,23 @@ final class Updater {
             ],
         ];
 
-        $token = (string) plu_get_option( 'github_token', '' );
+        $token = trim( (string) plu_get_option( 'github_token', '' ) );
         if ( '' !== $token ) {
-            $args['headers']['Authorization'] = 'Bearer ' . $token;
+            $args['headers']['Authorization'] = 'token ' . $token;
         }
 
         $response = wp_remote_get( $url, $args );
 
-        if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
-            set_transient( self::TRANSIENT_ERROR, 1, 10 * MINUTE_IN_SECONDS );
+        if ( is_wp_error( $response ) ) {
+            $err_diag = sprintf( 'Сетевая ошибка: %s (URL: %s)', $response->get_error_message(), $url );
+            set_transient( self::TRANSIENT_ERROR, $err_diag, 10 * MINUTE_IN_SECONDS );
+            return null;
+        }
+
+        $code = (int) wp_remote_retrieve_response_code( $response );
+        if ( 200 !== $code ) {
+            $err_diag = sprintf( 'HTTP %d: URL %s — проверьте, что репозиторий Public или укажите токен', $code, $url );
+            set_transient( self::TRANSIENT_ERROR, $err_diag, 10 * MINUTE_IN_SECONDS );
             return null;
         }
 
@@ -106,7 +114,8 @@ final class Updater {
             return $remote_version;
         }
 
-        set_transient( self::TRANSIENT_ERROR, 1, 10 * MINUTE_IN_SECONDS );
+        $err_diag = sprintf( 'В файле не найден заголовок Version (URL: %s)', $url );
+        set_transient( self::TRANSIENT_ERROR, $err_diag, 10 * MINUTE_IN_SECONDS );
         return null;
     }
 
@@ -117,7 +126,7 @@ final class Updater {
      * @return string Прямая ссылка на архив.
      */
     public static function get_download_package( string $remote_version ): string {
-        $token = (string) plu_get_option( 'github_token', '' );
+        $token = trim( (string) plu_get_option( 'github_token', '' ) );
         if ( '' !== $token ) {
             return 'https://api.github.com/repos/' . self::REPO_FULL . '/zipball/v' . $remote_version;
         }
@@ -133,8 +142,11 @@ final class Updater {
      * @return array<string, mixed>
      */
     public static function authorize_download_request( array $args, string $url ): array {
-        $token = (string) plu_get_option( 'github_token', '' );
+        $token = trim( (string) plu_get_option( 'github_token', '' ) );
         if ( '' === $token ) {
+            if ( isset( $args['headers']['Authorization'] ) ) {
+                unset( $args['headers']['Authorization'] );
+            }
             return $args;
         }
 
@@ -151,7 +163,7 @@ final class Updater {
             if ( ! isset( $args['headers'] ) || ! is_array( $args['headers'] ) ) {
                 $args['headers'] = [];
             }
-            $args['headers']['Authorization'] = 'Bearer ' . $token;
+            $args['headers']['Authorization'] = 'token ' . $token;
 
             if ( stripos( $url, 'api.github.com' ) !== false ) {
                 $args['headers']['Accept'] = 'application/vnd.github+json';
@@ -371,13 +383,24 @@ final class Updater {
         $remote_version = self::get_remote_version( true );
         $local_version  = self::get_local_version();
 
+        $redirect_params = [
+            'plu_remote_ver' => $remote_version ?? '',
+            'plu_local_ver'  => $local_version,
+        ];
+
         if ( null === $remote_version ) {
             $status = 'error';
+            $error_info = get_transient( self::TRANSIENT_ERROR );
+            if ( is_string( $error_info ) && '' !== $error_info ) {
+                $redirect_params['plu_err_diag'] = rawurlencode( $error_info );
+            }
         } elseif ( version_compare( $remote_version, $local_version, '>' ) ) {
             $status = 'available';
         } else {
             $status = 'latest';
         }
+
+        $redirect_params['plu_update_status'] = $status;
 
         // Принудительно обновляем общесистемный transient update_plugins
         $update_plugins = get_site_transient( 'update_plugins' );
@@ -386,11 +409,7 @@ final class Updater {
             set_site_transient( 'update_plugins', $update_plugins );
         }
 
-        wp_safe_redirect( add_query_arg( [
-            'plu_update_status' => $status,
-            'plu_remote_ver'    => $remote_version ?? '',
-            'plu_local_ver'     => $local_version,
-        ], admin_url( 'plugins.php' ) ) );
+        wp_safe_redirect( add_query_arg( $redirect_params, admin_url( 'plugins.php' ) ) );
         exit;
     }
 
@@ -422,7 +441,24 @@ final class Updater {
             );
             printf( '<div class="notice notice-warning is-dismissible"><p>%s</p></div>', $message );
         } elseif ( 'error' === $status ) {
-            $message = esc_html__( 'Polylang Up: Не удалось проверить обновления на GitHub (проверьте соединение или токен).', 'polyland-up' );
+            $diag_msg = '';
+            if ( ! empty( $_GET['plu_err_diag'] ) ) {
+                $diag_msg = sanitize_text_field( wp_unslash( rawurldecode( (string) $_GET['plu_err_diag'] ) ) );
+            } else {
+                $cached_err = get_transient( self::TRANSIENT_ERROR );
+                if ( is_string( $cached_err ) && '' !== $cached_err ) {
+                    $diag_msg = $cached_err;
+                }
+            }
+
+            if ( '' !== $diag_msg ) {
+                $message = sprintf(
+                    esc_html__( 'Polylang Up: Не удалось проверить обновления на GitHub (%s).', 'polyland-up' ),
+                    esc_html( $diag_msg )
+                );
+            } else {
+                $message = esc_html__( 'Polylang Up: Не удалось проверить обновления на GitHub (проверьте соединение или токен).', 'polyland-up' );
+            }
             printf( '<div class="notice notice-error is-dismissible"><p>%s</p></div>', $message );
         }
     }
