@@ -312,11 +312,21 @@ final class LinkRewriter {
     }
 
     /**
+     * Проверяет, содержит ли строка динамическую переменную или JSON-шаблон Divi 5 / Divi 4.
+     */
+    private static function is_dynamic_divi_value( string $value ): bool {
+        return str_contains( $value, '$variable(' )
+            || str_contains( $value, '@ET-DC@' )
+            || str_contains( $value, '{' )
+            || str_contains( $value, '}' );
+    }
+
+    /**
      * Проверяет, является ли URL внутренней ссылкой страницы/записи, пригодной к перелинковке.
      */
     public static function is_rewritable_internal_url( string $url ): bool {
         $trimmed = trim( $url );
-        if ( '' === $trimmed || str_starts_with( $trimmed, '#' ) ) {
+        if ( '' === $trimmed || str_starts_with( $trimmed, '#' ) || self::is_dynamic_divi_value( $trimmed ) ) {
             return false;
         }
 

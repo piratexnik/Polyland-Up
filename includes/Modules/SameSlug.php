@@ -543,51 +543,57 @@ final class SameSlug {
      * @return int Скорректированный post_id.
      */
     public static function filter_url_to_postid( int $post_id ): int {
-        if ( $post_id <= 0 || ! function_exists( 'pll_get_post_language' ) ) {
+        if ( self::$in_url_to_postid || $post_id <= 0 || ! function_exists( 'pll_get_post_language' ) ) {
             return $post_id;
         }
 
-        // Получаем URL из стека вызовов url_to_postid
-        $target_url = null;
-        // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_debug_backtrace
-        $trace = debug_backtrace( DEBUG_BACKTRACE_PROVIDE_OBJECT, 5 );
-        foreach ( $trace as $frame ) {
-            if ( isset( $frame['function'] ) && 'url_to_postid' === $frame['function'] && ! empty( $frame['args'][0] ) && is_string( $frame['args'][0] ) ) {
-                $target_url = $frame['args'][0];
-                break;
-            }
-        }
+        self::$in_url_to_postid = true;
 
-        $lang = self::detect_request_language( [], $target_url );
-        if ( ! $lang ) {
+        try {
+            // Получаем URL из стека вызовов url_to_postid
+            $target_url = null;
+            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_debug_backtrace
+            $trace = debug_backtrace( DEBUG_BACKTRACE_PROVIDE_OBJECT, 5 );
+            foreach ( $trace as $frame ) {
+                if ( isset( $frame['function'] ) && 'url_to_postid' === $frame['function'] && ! empty( $frame['args'][0] ) && is_string( $frame['args'][0] ) ) {
+                    $target_url = $frame['args'][0];
+                    break;
+                }
+            }
+
+            $lang = self::detect_request_language( [], $target_url );
+            if ( ! $lang ) {
+                return $post_id;
+            }
+
+            $found_lang = pll_get_post_language( $post_id, 'slug' );
+            if ( $found_lang === $lang ) {
+                return $post_id;
+            }
+
+            // 1. Если записи связаны как переводы в Polylang
+            if ( function_exists( 'pll_get_post' ) ) {
+                $translated_id = (int) pll_get_post( $post_id, $lang );
+                if ( $translated_id > 0 ) {
+                    return $translated_id;
+                }
+            }
+
+            // 2. Поиск по пути и языку
+            $path      = get_page_uri( $post_id ) ?: (string) get_post_field( 'post_name', $post_id );
+            $post_type = get_post_type( $post_id ) ?: 'page';
+
+            if ( '' !== $path ) {
+                $resolved_id = self::resolve_post_by_path_and_lang( $path, $lang, $post_type );
+                if ( null !== $resolved_id ) {
+                    return $resolved_id;
+                }
+            }
+
             return $post_id;
+        } finally {
+            self::$in_url_to_postid = false;
         }
-
-        $found_lang = pll_get_post_language( $post_id, 'slug' );
-        if ( $found_lang === $lang ) {
-            return $post_id;
-        }
-
-        // 1. Если записи связаны как переводы в Polylang
-        if ( function_exists( 'pll_get_post' ) ) {
-            $translated_id = (int) pll_get_post( $post_id, $lang );
-            if ( $translated_id > 0 ) {
-                return $translated_id;
-            }
-        }
-
-        // 2. Поиск по пути и языку
-        $path      = get_page_uri( $post_id ) ?: (string) get_post_field( 'post_name', $post_id );
-        $post_type = get_post_type( $post_id ) ?: 'page';
-
-        if ( '' !== $path ) {
-            $resolved_id = self::resolve_post_by_path_and_lang( $path, $lang, $post_type );
-            if ( null !== $resolved_id ) {
-                return $resolved_id;
-            }
-        }
-
-        return $post_id;
     }
 
     /**

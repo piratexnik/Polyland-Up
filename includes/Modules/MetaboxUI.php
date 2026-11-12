@@ -286,45 +286,56 @@ final class MetaboxUI {
             'overwrite_existing' => ! empty( $_POST['overwrite_existing'] ),
         ];
 
-        // Поддержка как одиночного target_lang (пошаговый AJAX из JS), так и массива target_langs
-        $single_lang = isset( $_POST['target_lang'] ) ? sanitize_key( (string) $_POST['target_lang'] ) : '';
-        if ( '' !== $single_lang ) {
-            $result = self::duplicate_post_to_language( $source_post, $single_lang, $options );
-            if ( is_wp_error( $result ) ) {
+        try {
+            // Поддержка как одиночного target_lang (пошаговый AJAX из JS), так и массива target_langs
+            $single_lang = isset( $_POST['target_lang'] ) ? sanitize_key( (string) $_POST['target_lang'] ) : '';
+            if ( '' !== $single_lang ) {
+                $result = self::duplicate_post_to_language( $source_post, $single_lang, $options );
+                if ( is_wp_error( $result ) ) {
+                    wp_send_json_error( [
+                        'message' => $result->get_error_message(),
+                        'lang'    => $single_lang,
+                    ] );
+                }
+                wp_send_json_success( $result );
+            }
+
+            $raw_langs    = isset( $_POST['target_langs'] ) && is_array( $_POST['target_langs'] ) ? $_POST['target_langs'] : [];
+            $target_langs = array_values( array_filter( array_map( 'sanitize_key', $raw_langs ) ) );
+
+            if ( empty( $target_langs ) ) {
                 wp_send_json_error( [
-                    'message' => $result->get_error_message(),
-                    'lang'    => $single_lang,
+                    'message' => esc_html__( 'Не выбран ни один целевой язык для дублирования.', 'polyland-up' ),
                 ] );
             }
-            wp_send_json_success( $result );
-        }
 
-        $raw_langs    = isset( $_POST['target_langs'] ) && is_array( $_POST['target_langs'] ) ? $_POST['target_langs'] : [];
-        $target_langs = array_values( array_filter( array_map( 'sanitize_key', $raw_langs ) ) );
+            $results = [];
+            foreach ( $target_langs as $lang_slug ) {
+                $res = self::duplicate_post_to_language( $source_post, $lang_slug, $options );
+                if ( is_wp_error( $res ) ) {
+                    $results[] = [
+                        'success' => false,
+                        'lang'    => $lang_slug,
+                        'message' => $res->get_error_message(),
+                    ];
+                } else {
+                    $results[] = array_merge( [ 'success' => true ], $res );
+                }
+            }
 
-        if ( empty( $target_langs ) ) {
+            wp_send_json_success( [
+                'results' => $results,
+            ] );
+        } catch ( \Throwable $e ) {
             wp_send_json_error( [
-                'message' => esc_html__( 'Не выбран ни один целевой язык для дублирования.', 'polyland-up' ),
+                'message' => sprintf(
+                    'PHP Error: %s в %s:%d',
+                    $e->getMessage(),
+                    basename( $e->getFile() ),
+                    $e->getLine()
+                ),
             ] );
         }
-
-        $results = [];
-        foreach ( $target_langs as $lang_slug ) {
-            $res = self::duplicate_post_to_language( $source_post, $lang_slug, $options );
-            if ( is_wp_error( $res ) ) {
-                $results[] = [
-                    'success' => false,
-                    'lang'    => $lang_slug,
-                    'message' => $res->get_error_message(),
-                ];
-            } else {
-                $results[] = array_merge( [ 'success' => true ], $res );
-            }
-        }
-
-        wp_send_json_success( [
-            'results' => $results,
-        ] );
     }
 
     /**
@@ -371,6 +382,12 @@ final class MetaboxUI {
 
         $is_update = $existing_id > 0;
 
+        // Сохраняем глобальный язык Polylang админки, чтобы не сбить home_url() и интерфейс (защита от предупреждений Rank Math)
+        $prev_curlang = ( function_exists( 'PLL' ) && is_object( PLL() ) && isset( PLL()->curlang ) )
+            ? PLL()->curlang
+            : null;
+
+        try {
         // 2. Определение переведенного родителя (post_parent)
         $target_parent = 0;
         if ( $source_post->post_parent > 0 && function_exists( 'pll_get_post' ) ) {
@@ -529,22 +546,27 @@ final class MetaboxUI {
         $view_url = (string) get_permalink( $new_post_id );
 
         return [
-            'post_id'             => $new_post_id,
-            'lang'                => $target_lang,
-            'lang_upper'          => strtoupper( $target_lang ),
-            'title'               => get_the_title( $new_post_id ),
-            'slug'                => (string) get_post_field( 'post_name', $new_post_id ),
-            'status'              => (string) get_post_status( $new_post_id ),
-            'updated'             => $is_update,
-            'edit_url'            => (string) get_edit_post_link( $new_post_id, 'raw' ),
-            'view_url'            => $view_url,
-            'divi_url'            => add_query_arg( 'et_fb', '1', $view_url ),
+            'post_id'               => $new_post_id,
+            'lang'                  => $target_lang,
+            'lang_upper'            => strtoupper( $target_lang ),
+            'title'                 => get_the_title( $new_post_id ),
+            'slug'                  => (string) get_post_field( 'post_name', $new_post_id ),
+            'status'                => (string) get_post_status( $new_post_id ),
+            'updated'               => $is_update,
+            'edit_url'              => (string) get_edit_post_link( $new_post_id, 'raw' ),
+            'view_url'              => $view_url,
+            'divi_url'              => add_query_arg( 'et_fb', '1', $view_url ),
             'notes'                 => $notes,
             'translated_count'      => $translated_count,
             'rewritten_links_count' => $rewritten_links_count,
             'translation_stats'     => $translation_stats,
             'translation_summary'   => $translation_summary,
         ];
+        } finally {
+            if ( function_exists( 'PLL' ) && is_object( PLL() ) && property_exists( PLL(), 'curlang' ) ) {
+                PLL()->curlang = $prev_curlang;
+            }
+        }
     }
 
     /**

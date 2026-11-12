@@ -1182,36 +1182,19 @@ final class DiviParser {
             return [];
         }
 
-        $has_protected_blocks = false !== stripos( $html, '<script' )
-            || false !== stripos( $html, '<style' )
-            || false !== stripos( $html, '<svg' )
-            || false !== strpos( $html, '<!--' );
-
-        if ( ! $has_protected_blocks ) {
-            $parts = [ $html ];
-        } else {
-            $parts = preg_split(
-                '/(<(?:script|style|svg)\b[^>]*>.*?<\/(?:script|style|svg)>|<!--.*?-->)/is',
-                $html,
-                -1,
-                PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY
-            );
-
-            if ( ! is_array( $parts ) ) {
-                $parts = [ $html ];
-            }
-        }
-
+        $parts    = self::split_protected_html_blocks( $html );
         $segments = [];
-        foreach ( $parts as $part ) {
-            if ( 1 === preg_match( '/^(?:<(?:script|style|svg)\b|<!--)/is', $part ) ) {
+
+        foreach ( $parts as $item ) {
+            if ( ! empty( $item['protected'] ) ) {
                 $segments[] = [
                     'kind' => 'raw',
-                    'text' => $part,
+                    'text' => $item['text'],
                 ];
                 continue;
             }
 
+            $part         = $item['text'];
             $use_granular = $granular_html
                 || ( strlen( $part ) > 800 && 1 === preg_match( '/<[a-zA-Z][^>]*>/', $part ) );
 
@@ -1223,6 +1206,86 @@ final class DiviParser {
         }
 
         return $segments;
+    }
+
+    /**
+     * Линейный O(N) сканер для изоляции <script>, <style>, <svg> и HTML-комментариев <!-- ... -->
+     * без риска PCRE backtrack limit на больших CSS/JS-блоках.
+     *
+     * @param string $html Входной HTML.
+     * @return array<int, array{protected: bool, text: string}>
+     */
+    private static function split_protected_html_blocks( string $html ): array {
+        $has_protected = false !== stripos( $html, '<script' )
+            || false !== stripos( $html, '<style' )
+            || false !== stripos( $html, '<svg' )
+            || false !== strpos( $html, '<!--' );
+
+        if ( ! $has_protected ) {
+            return [ [ 'protected' => false, 'text' => $html ] ];
+        }
+
+        $result = [];
+        $len    = strlen( $html );
+        $pos    = 0;
+
+        while ( $pos < $len ) {
+            $candidates = [];
+
+            foreach ( [ '<script', '<style', '<svg' ] as $tag ) {
+                $p = stripos( $html, $tag, $pos );
+                if ( false !== $p ) {
+                    // Убеждаемся, что после имени тега идет пробел, '>' или '/'
+                    $next_ch = $html[ $p + strlen( $tag ) ] ?? '';
+                    if ( '' === $next_ch || '>' === $next_ch || '/' === $next_ch || ctype_space( $next_ch ) ) {
+                        $candidates[] = [ 'pos' => $p, 'type' => ltrim( $tag, '<' ) ];
+                    }
+                }
+            }
+
+            $comment_pos = strpos( $html, '<!--', $pos );
+            if ( false !== $comment_pos ) {
+                $candidates[] = [ 'pos' => $comment_pos, 'type' => 'comment' ];
+            }
+
+            if ( empty( $candidates ) ) {
+                $tail = substr( $html, $pos );
+                if ( '' !== $tail ) {
+                    $result[] = [ 'protected' => false, 'text' => $tail ];
+                }
+                break;
+            }
+
+            usort( $candidates, static fn( array $a, array $b ): int => $a['pos'] <=> $b['pos'] );
+            $nearest    = $candidates[0];
+            $start_pos  = $nearest['pos'];
+            $block_type = $nearest['type'];
+
+            if ( $start_pos > $pos ) {
+                $result[] = [ 'protected' => false, 'text' => substr( $html, $pos, $start_pos - $pos ) ];
+            }
+
+            if ( 'comment' === $block_type ) {
+                $end_pos = strpos( $html, '-->', $start_pos + 4 );
+                $end_len = 3;
+            } else {
+                $close_tag = '</' . $block_type . '>';
+                $end_pos   = stripos( $html, $close_tag, $start_pos );
+                $end_len   = strlen( $close_tag );
+            }
+
+            if ( false === $end_pos ) {
+                // Незакрытый защищенный блок отдаем как protected до конца строки
+                $result[] = [ 'protected' => true, 'text' => substr( $html, $start_pos ) ];
+                break;
+            }
+
+            $block_end = $end_pos + $end_len;
+            $result[]  = [ 'protected' => true, 'text' => substr( $html, $start_pos, $block_end - $start_pos ) ];
+            $pos       = $block_end;
+        }
+
+        return $result;
     }
 
     /**
@@ -1429,7 +1492,7 @@ final class DiviParser {
         }
 
         $img_idx = 0;
-        return (string) preg_replace_callback(
+        $res     = preg_replace_callback(
             '/<img\b[^>]*>/i',
             static function ( array $matches ) use ( &$img_idx, $img_replacements, $translated_dict ): string {
                 $tag         = $matches[0];
@@ -1441,7 +1504,7 @@ final class DiviParser {
 
                 $attr_keys = $img_replacements[ $current_idx ];
 
-                return (string) preg_replace_callback(
+                $tag_res = preg_replace_callback(
                     '/(?<=\s)(alt|title)(\s*=\s*)(?:"([^"]*)"|\'([^\']*)\')/iu',
                     static function ( array $attr_match ) use ( $attr_keys, $translated_dict ): string {
                         $attr_name = strtolower( $attr_match[1] );
@@ -1464,9 +1527,13 @@ final class DiviParser {
                     },
                     $tag
                 );
+
+                return is_string( $tag_res ) ? $tag_res : $tag;
             },
             $html
         );
+
+        return is_string( $res ) ? $res : $html;
     }
 
     /**
@@ -1479,6 +1546,11 @@ final class DiviParser {
     public static function is_translatable_string( string $text, bool $allow_html = false ): bool {
         $trimmed = trim( $text );
         if ( '' === $trimmed ) {
+            return false;
+        }
+
+        // Отсекаем динамические переменные и шаблоны Divi 5 / Divi 4 ($variable(...)$ и @ET-DC@...)
+        if ( str_contains( $trimmed, '$variable(' ) || str_contains( $trimmed, '@ET-DC@' ) ) {
             return false;
         }
 

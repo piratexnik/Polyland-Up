@@ -225,8 +225,14 @@
                     },
                     error: function(xhr, status, error) {
                         const $stepRow = $('#' + rowId);
+                        const serverMsg = (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message)
+                            ? xhr.responseJSON.data.message
+                            : '';
+                        const displayErr = serverMsg
+                            ? `${esc(serverMsg)} (HTTP ${esc(xhr.status || 500)})`
+                            : `Сетевая ошибка (${esc(error || status)}, HTTP ${esc(xhr.status || 500)})`;
                         $stepRow.addClass('is-error').html(
-                            `<strong>&#10060; ${langCodeUpper}:</strong> Сетевая ошибка (${esc(error || status)}, HTTP ${esc(xhr.status || 500)})`
+                            `<strong>&#10060; ${langCodeUpper}:</strong> ${displayErr}`
                         );
                     },
                     complete: function() {

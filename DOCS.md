@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `1.5`
+- **Текущая версия:** `1.7`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -39,7 +39,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '1.5'
+- `PLU_VERSION` — '1.7'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -131,7 +131,8 @@ plu_get_option( string $key, mixed $default = '' ): mixed
    - Привязывает язык и группу переводов Polylang (`pll_set_post_language`, `pll_save_post_translations`).
    - Копирует мета-поля (Divi, Rank Math, `_thumbnail_id`, `_wp_page_template`), исключая `_edit_lock`, `_edit_last`, `_wp_old_slug`, `_wp_old_date` и кеш стилей Divi (`_et_pb_static_css_file`, `_et_core_cached_shortcodes`, `_et_dynamic_cached_shortcodes`, `_et_builder_module_features_cache`).
    - Синхронизирует все таксономии с автоматической подстановкой переведенных термов (`pll_get_term`).
-   - Вызывает `DiviParser::translate_post_data()` при выборе `translate_gtx` или `translate_gemini`, перезаписывает переведенные SEO-метаполя Rank Math и возвращает сводку статистики перевода (`translated_count`, `provider_label`, `time_sec`, `translation_summary`) в лог интерфейса.
+   - Вызывает `DiviParser::translate_post_data()` при выборе `translate_gtx` или `translate_gemini`, перезаписывает переведенные SEO-метаполя Rank Math и возвращает сводку статистики перевода (`translated_count`, `rewritten_links_count`, `provider_label`, `time_sec`, `translation_summary`) в лог интерфейса.
+   - Оборачивает AJAX-обработчик в `try / catch (\Throwable)` для вывода точной PHP-ошибки вместо обезличенного `HTTP 500`, а также сохраняет и восстанавливает `PLL()->curlang` в блоке `finally`, предотвращая переключение языка админки и ложные срабатывания Rank Math о смене `home_url()`.
 
 ---
 
@@ -144,11 +145,11 @@ plu_get_option( string $key, mixed $default = '' ): mixed
    - Полностью игнорирует `core/code` и технические ветки атрибутов (`decoration`, `advanced`, `builderVersion`, `css`, `meta`, `font`, `background`, `border`, `spacing`, `link`, `adminLabel`, `socialNetwork`, `modulePreset` и др.), **за исключением** панели `attributes` (внутри `decoration`/`advanced`): если элемент содержит `attributeName` (`title`, `alt`, `aria-label`, `placeholder`, `data-title`, `data-caption`, `label`) и `attributeValue`, значение переводится и подставляется обратно.
    - Извлекает строки из `innerContent -> {desktop|tablet|phone} -> {value|hover}` и белого списка ключей (`text`, `title`, `heading`, `subhead`, `buttonText`, `alt`, `titleText`, `caption`, `description`, `label`, `placeholder` и др.), а также из `innerContent` / `innerHTML` без дублирования запросов.
 3. **HTML, `divi/code`, `<img alt/title>` и Divi 4 шорткоды:**
-   - Изолирует блоки `<script>`, `<style>`, `<svg>` и HTML-комментарии `<!-- ... -->`, чтобы не передавать код в переводчик.
+   - Линейный $O(N)$ сканер `split_protected_html_blocks()` изолирует `<script>`, `<style>`, `<svg>` и HTML-комментарии `<!-- ... -->` без риска переполнения `pcre.backtrack_limit` на больших CSS/JS-блоках; все `preg_replace_callback()` защищены фоллбэком на исходную строку.
    - Для блоков `divi/code`, `divi/fullwidth-code`, `core/html` и крупных HTML-фрагментов (>800 байт) применяет поузловой токенизатор: переводит текстовые узлы и атрибуты `alt`/`title`/`placeholder`/`aria-label` раздельно без превышения лимита GTX и без искажения HTML-структуры.
    - Посимвольный токенизатор шорткодов `[et_pb_...]` переводит разрешенные атрибуты (`title`, `button_text`, `subhead`, `alt`, `heading` и др.) с безопасным экранированием `"`, `[`, `]`, игнорируя содержимое `[et_pb_code]` и `[et_pb_fullwidth_code]`.
 4. **Строгая фильтрация (`is_translatable_string`):**
-   - Отсекает URL-ы, пути, домены, имена файлов, CSS-значения/цвета/единицы, JSON-строки, булевы/технические константы (`on`, `off`, `true`, `false`, `h1`–`h6`, `left`/`center`/`right`), snake_case идентификаторы и строки без букв (`\p{L}`).
+   - Отсекает динамические переменные Divi (`$variable(...)`, `@ET-DC@...`), URL-ы, пути, домены, имена файлов, CSS-значения/цвета/единицы, JSON-строки, булевы/технические константы (`on`, `off`, `true`, `false`, `h1`–`h6`, `left`/`center`/`right`), snake_case идентификаторы и строки без букв (`\p{L}`).
 
 ---
 
@@ -167,16 +168,16 @@ plu_get_option( string $key, mixed $default = '' ): mixed
 ---
 
 ## 10. Умная перелинковка внутренних ссылок (`LinkRewriter.php`)
-Вызывается в `MetaboxUI::duplicate_post_to_language()` при активном флаге `rewrite_links` и подсчитывает количество измененных ссылок (`get_last_rewritten_count()`):
+Вызывается в `MetaboxUI::duplicate_post_to_language()` при активном флаге `rewrite_links`, сохраняет/восстанавливает `PLL()->curlang` и подсчитывает количество измененных ссылок (`get_last_rewritten_count()`):
 1. **Точки поиска ссылок (`rewrite_content`):**
    - Атрибуты `href="..."` внутри тегов `<a>` в HTML-контенте.
    - Ключи ссылок в JSON-атрибутах блоков Divi 5 (`url`, `linkUrl`, `buttonUrl`, `titleUrl`, `imageUrl`, `buttonOneUrl`, `buttonTwoUrl`, `logoUrl`, `readMoreUrl`), исключая медиа-контекст (`background`, `video`, `audio`).
    - Атрибуты шорткодов Divi 4 (`url`, `button_url`, `link_url`, `button_one_url`, `button_two_url`, `title_link_url`).
 2. **Фильтрация (`is_rewritable_internal_url`):**
-   - Пропускает внешние домены, пустые ссылки, `#якоря`, не-HTTP схемы (`mailto:`, `tel:`, `javascript:`), системные пути (`/wp-content/uploads/`, `/wp-admin/`, `/wp-login.php`, `/wp-json/`) и ссылки на файлы/медиа (`.jpg`, `.png`, `.svg`, `.webp`, `.pdf`, `.zip`, `.mp4` и др.).
+   - Пропускает динамические переменные Divi (`$variable(...)`, `@ET-DC@...`, `{`, `}`), внешние домены, пустые ссылки, `#якоря`, не-HTTP схемы (`mailto:`, `tel:`, `javascript:`), системные пути (`/wp-content/uploads/`, `/wp-admin/`, `/wp-login.php`, `/wp-json/`) и ссылки на файлы/медиа (`.jpg`, `.png`, `.svg`, `.webp`, `.pdf`, `.zip`, `.mp4` и др.).
 3. **Алгоритм замены (`rewrite_url`):**
    - Сохраняет `?query` и `#fragment`, а также относительность/абсолютность исходного URL.
-   - Определяет ID записи через `url_to_postid()` и запасной резолвер `SameSlug::resolve_post_by_path_and_lang()`.
+   - Определяет ID записи через `url_to_postid()` (с защитой от рекурсии `$in_url_to_postid` в `SameSlug`) и запасной резолвер `SameSlug::resolve_post_by_path_and_lang()`.
    - Если запись найдена и существует перевод `pll_get_post( $id, $target_lang )` — подставляет реальный `get_permalink( $translated_id )`.
    - Если перевода еще нет — переключает языковой префикс через `PLL()->links_model->switch_language_in_link()` или ручной разбор пути с учетом `pll_default_language` и `hide_default`.
 
