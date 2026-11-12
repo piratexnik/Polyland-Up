@@ -178,6 +178,9 @@
                         if (response.success && response.data) {
                             const d = response.data;
                             const actionLabel = d.updated ? (i18n.done_updated || 'обновлён!') : (i18n.done_created || 'готов!');
+                            const summaryHtml = d.translation_summary
+                                ? ` <span class="plu-log-summary">— ${esc(d.translation_summary)}.</span>`
+                                : '';
                             let notesHtml = '';
 
                             if (Array.isArray(d.notes) && d.notes.length > 0) {
@@ -187,7 +190,7 @@
                             const resultHtml = `
                                 <div>
                                     <strong>&#9989; Язык ${esc(d.lang_upper)} ${esc(actionLabel)}</strong>
-                                    <span style="color:#646970;">(#${esc(d.post_id)}, slug: <code>${esc(d.slug)}</code>)</span>
+                                    <span style="color:#646970;">(#${esc(d.post_id)}, slug: <code>${esc(d.slug)}</code>)</span>${summaryHtml}
                                 </div>
                                 ${notesHtml}
                                 <div class="plu-log-links">

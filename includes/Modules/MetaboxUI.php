@@ -381,11 +381,15 @@ final class MetaboxUI {
         }
 
         // 3. Подготовка контента и точек расширения (Этапы 4–6)
-        $post_title   = $source_post->post_title;
-        $post_excerpt = $source_post->post_excerpt;
-        $post_content = $source_post->post_content;
-        $mode         = (string) ( $options['mode'] ?? 'clone_only' );
-        $notes        = [];
+        $post_title          = $source_post->post_title;
+        $post_excerpt        = $source_post->post_excerpt;
+        $post_content        = $source_post->post_content;
+        $rank_math_meta      = [];
+        $translated_count    = 0;
+        $translation_stats   = [];
+        $translation_summary = '';
+        $mode                = (string) ( $options['mode'] ?? 'clone_only' );
+        $notes               = [];
 
         $is_translation_mode = in_array( $mode, [ 'translate_gtx', 'translate_gemini' ], true );
         if ( $is_translation_mode ) {
@@ -406,12 +410,29 @@ final class MetaboxUI {
                     return $translated;
                 }
                 if ( is_array( $translated ) ) {
-                    $post_title   = (string) ( $translated['post_title'] ?? $post_title );
-                    $post_excerpt = (string) ( $translated['post_excerpt'] ?? $post_excerpt );
-                    $post_content = (string) ( $translated['post_content'] ?? $post_content );
+                    $post_title        = (string) ( $translated['post_title'] ?? $post_title );
+                    $post_excerpt      = (string) ( $translated['post_excerpt'] ?? $post_excerpt );
+                    $post_content      = (string) ( $translated['post_content'] ?? $post_content );
+                    $rank_math_meta    = is_array( $translated['rank_math_meta'] ?? null ) ? $translated['rank_math_meta'] : [];
+                    $translated_count  = (int) ( $translated['translated_count'] ?? 0 );
+                    $translation_stats = is_array( $translated['stats'] ?? null ) ? $translated['stats'] : [];
+
+                    if ( $translated_count > 0 ) {
+                        $provider            = (string) ( $translation_stats['provider_label'] ?? ( 'gemini' === $engine ? 'Google Gemini AI' : 'Google GTX' ) );
+                        $time_str            = number_format( (float) ( $translation_stats['time_sec'] ?? 0.0 ), 1, '.', '' );
+                        $translation_summary = sprintf(
+                            '%s (%s, %s %s)',
+                            self::format_translated_blocks_count( $translated_count ),
+                            $provider,
+                            $time_str,
+                            __( 'сек', 'polyland-up' )
+                        );
+                    } else {
+                        $translation_summary = __( 'Текстовых блоков для перевода не найдено (выполнено клонирование)', 'polyland-up' );
+                    }
                 }
             } else {
-                $notes[] = __( 'Клонирование выполнено. Модуль AI-парсера будет подключен на Этапе 4.', 'polyland-up' );
+                $notes[] = __( 'Клонирование выполнено. Модуль AI-парсера недоступен.', 'polyland-up' );
             }
         }
 
@@ -489,7 +510,16 @@ final class MetaboxUI {
         // 6. Копирование мета-полей (Divi 5, Rank Math, шаблоны, миниатюра) с очисткой кеша стилей
         self::copy_post_meta( $source_post->ID, $new_post_id, $is_update );
 
-        // Хук расширения для перевода SEO-метаданных на Этапе 4
+        // Перезаписываем переведенные SEO-поля Rank Math (с wp_slash для защиты спецсимволов)
+        if ( ! empty( $rank_math_meta ) ) {
+            foreach ( $rank_math_meta as $meta_key => $meta_value ) {
+                if ( is_string( $meta_key ) && is_string( $meta_value ) && '' !== trim( $meta_value ) ) {
+                    update_post_meta( $new_post_id, $meta_key, wp_slash( $meta_value ) );
+                }
+            }
+        }
+
+        // Хук расширения после копирования и перевода SEO-метаданных
         do_action( 'plu_after_copy_post_meta', $new_post_id, $source_post, $target_lang, $options );
 
         // 7. Синхронизация таксономий с поиском переведенных термов
@@ -499,17 +529,20 @@ final class MetaboxUI {
         $view_url = (string) get_permalink( $new_post_id );
 
         return [
-            'post_id'    => $new_post_id,
-            'lang'       => $target_lang,
-            'lang_upper' => strtoupper( $target_lang ),
-            'title'      => get_the_title( $new_post_id ),
-            'slug'       => (string) get_post_field( 'post_name', $new_post_id ),
-            'status'     => (string) get_post_status( $new_post_id ),
-            'updated'    => $is_update,
-            'edit_url'   => (string) get_edit_post_link( $new_post_id, 'raw' ),
-            'view_url'   => $view_url,
-            'divi_url'   => add_query_arg( 'et_fb', '1', $view_url ),
-            'notes'      => $notes,
+            'post_id'             => $new_post_id,
+            'lang'                => $target_lang,
+            'lang_upper'          => strtoupper( $target_lang ),
+            'title'               => get_the_title( $new_post_id ),
+            'slug'                => (string) get_post_field( 'post_name', $new_post_id ),
+            'status'              => (string) get_post_status( $new_post_id ),
+            'updated'             => $is_update,
+            'edit_url'            => (string) get_edit_post_link( $new_post_id, 'raw' ),
+            'view_url'            => $view_url,
+            'divi_url'            => add_query_arg( 'et_fb', '1', $view_url ),
+            'notes'               => $notes,
+            'translated_count'    => $translated_count,
+            'translation_stats'   => $translation_stats,
+            'translation_summary' => $translation_summary,
         ];
     }
 
@@ -616,4 +649,28 @@ final class MetaboxUI {
             wp_set_object_terms( $target_id, array_values( array_unique( $target_ids ) ), $taxonomy, false );
         }
     }
+
+    /**
+     * Форматирует количество переведенных текстовых блоков с учетом русского склонения.
+     *
+     * @param int $count Количество переведенных элементов.
+     * @return string
+     */
+    private static function format_translated_blocks_count( int $count ): string {
+        $mod100 = $count % 100;
+        $mod10  = $count % 10;
+
+        if ( $mod100 >= 11 && $mod100 <= 14 ) {
+            $word = __( 'текстовых блоков', 'polyland-up' );
+        } elseif ( 1 === $mod10 ) {
+            $word = __( 'текстовый блок', 'polyland-up' );
+        } elseif ( $mod10 >= 2 && $mod10 <= 4 ) {
+            $word = __( 'текстовых блока', 'polyland-up' );
+        } else {
+            $word = __( 'текстовых блоков', 'polyland-up' );
+        }
+
+        return sprintf( '%s %d %s', __( 'Переведено', 'polyland-up' ), $count, $word );
+    }
 }
+

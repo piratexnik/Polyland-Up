@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `1.3`
+- **Текущая версия:** `1.5`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -22,9 +22,9 @@ Polyland-Up/
 ├── Polyland-Up.php           # Точка входа, константы, автозагрузчик, plu_get_option()
 ├── assets/
 │   ├── css/
-│   │   └── admin.css         # Стили статусов, бейджей и админ-панели
+│   │   └── admin.css         # Стили статусов, бейджей, метабокса и лога перевода
 │   └── js/
-│       └── admin.js          # AJAX-тестирование подключения к API перевода
+│       └── admin.js          # AJAX-тестирование API и последовательный конвейер дубликатора
 └── includes/
     ├── Core/
     │   ├── Init.php          # Первичная инициализация компонентов ядра
@@ -39,7 +39,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '1.3'
+- `PLU_VERSION` — '1.5'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -131,4 +131,36 @@ plu_get_option( string $key, mixed $default = '' ): mixed
    - Привязывает язык и группу переводов Polylang (`pll_set_post_language`, `pll_save_post_translations`).
    - Копирует мета-поля (Divi, Rank Math, `_thumbnail_id`, `_wp_page_template`), исключая `_edit_lock`, `_edit_last`, `_wp_old_slug`, `_wp_old_date` и кеш стилей Divi (`_et_pb_static_css_file`, `_et_core_cached_shortcodes`, `_et_dynamic_cached_shortcodes`, `_et_builder_module_features_cache`).
    - Синхронизирует все таксономии с автоматической подстановкой переведенных термов (`pll_get_term`).
-   - Содержит точки расширения для конвейера Этапов 4–6 (`DiviParser`, `TranslatorAPI`, `LinkRewriter` и хуки `plu_before_insert_cloned_post` / `plu_after_copy_post_meta`).
+   - Вызывает `DiviParser::translate_post_data()` при выборе `translate_gtx` или `translate_gemini`, перезаписывает переведенные SEO-метаполя Rank Math и возвращает сводку статистики перевода (`translated_count`, `provider_label`, `time_sec`, `translation_summary`) в лог интерфейса.
+
+---
+
+## 8. Парсер и сборщик контента (`DiviParser.php`)
+Обеспечивает единый конвейер извлечения плоского словаря (`k_0`, `k_1`, ...) и обратной сборки записи через `translate_post_data()`, `extract_post_dictionary()` и `apply_translated_dictionary()`:
+1. **Заголовки и Rank Math SEO:**
+   - Извлекает `post_title`, `post_excerpt` и метаполя `rank_math_title`, `rank_math_description`, `rank_math_focus_keyword` (пропуская строки, состоящие исключительно из технических переменных `%title% %sep% %sitename%`).
+2. **Divi 5 (Gutenberg JSON-блоки):**
+   - Использует `parse_blocks()` и `serialize_blocks()` с предварительной очисткой битых UTF-8 последовательностей и сохранением экранирования `\"` через `wp_slash()` на этапе сохранения поста.
+   - Полностью игнорирует блоки `divi/code`, `divi/fullwidth-code`, `core/code` и технические ветки атрибутов (`decoration`, `advanced`, `builderVersion`, `css`, `meta`, `font`, `background`, `border`, `spacing`, `link`, `adminLabel`, `socialNetwork`, `modulePreset` и др.).
+   - Извлекает строки из `innerContent -> {desktop|tablet|phone} -> {value|hover}` и белого списка ключей (`text`, `title`, `heading`, `subhead`, `buttonText`, `alt`, `titleText`, `caption`, `description`, `label`, `placeholder` и др.), а также из `innerContent` / `innerHTML` без дублирования запросов.
+3. **HTML, `<img alt/title>` и Divi 4 шорткоды:**
+   - Изолирует блоки `<script>`, `<style>`, `<svg>`, чтобы не передавать код в переводчик.
+   - Отдельно извлекает и принудительно обновляет атрибуты `alt` и `title` внутри тегов `<img ...>`.
+   - Посимвольный токенизатор шорткодов `[et_pb_...]` переводит разрешенные атрибуты (`title`, `button_text`, `subhead`, `alt`, `heading` и др.) с безопасным экранированием `"`, `[`, `]`, игнорируя содержимое `[et_pb_code]` и `[et_pb_fullwidth_code]`.
+4. **Строгая фильтрация (`is_translatable_string`):**
+   - Отсекает URL-ы, пути, домены, имена файлов, CSS-значения/цвета/единицы, JSON-строки, булевы/технические константы (`on`, `off`, `true`, `false`, `h1`–`h6`, `left`/`center`/`right`), snake_case идентификаторы и строки без букв (`\p{L}`).
+
+---
+
+## 9. Шлюз пакетного перевода (`TranslatorAPI.php`)
+Принимает ассоциативный словарь `['k_0' => '...']`, исходный/целевой язык Polylang и движок (`gtx` или `gemini`), возвращая переведенный словарь и собирая метрики (`get_last_stats()`):
+1. **Нормализация кодов языков (`normalize_lang_code`):**
+   - Преобразует нестандартные слаги Polylang (`ua` -> `uk`, `jp` -> `ja`, `cz` -> `cs`, `zh-cn` -> `zh-CN` и др.) и при необходимости уточняет 2-буквенный код из локали Polylang (`PLL()->model->get_language()`).
+2. **Провайдер 1 — Google GTX (`translate_via_gtx`):**
+   - Защищает HTML-теги и переменные Rank Math (`%sep%`, `%sitename%`, `%title%`) числовыми токенами `[[9000]]`, `[[9001]]` и т.д. перед отправкой.
+   - Упаковывает строки в батчи до ~2200 символов (до 25 элементов) через разделитель `\n[[[PLU_SEP_99]]]\n` для пакетных Google-каналов (`clients5` -> `gtx`).
+   - При несовпадении сегментов или сбое переходит на поштучный 3-ступенчатый фоллбэк `Settings::translate_free_cascade()` (`clients5` -> `gtx` -> `mymemory`).
+3. **Провайдер 2 — Google Gemini AI (`translate_via_gemini`):**
+   - Разбивает словарь на чанки по 40 элементов и отправляет POST в `v1beta/models/{model}:generateContent` (`responseMimeType: application/json`, `temperature: 0.2`, таймаут 60 сек) с пользовательским `system_prompt` и инструкцией сохранения ключей/тегов/Rank Math переменных.
+   - Повторяет запрос при HTTP 429/503, очищает возможные markdown-обертки ` ```json ` и сохраняет оригиналы при сбое отдельного ключа.
+
