@@ -404,6 +404,7 @@ final class TranslatorAPI {
         }
 
         $model = trim( (string) plu_get_option( 'gemini_model', 'gemini-2.5-flash' ) );
+        $model = (string) preg_replace( '#^models/#i', '', $model );
         if ( '' === $model ) {
             $model = 'gemini-2.5-flash';
         }
@@ -419,7 +420,7 @@ final class TranslatorAPI {
 
         $full_system_instruction = '' !== $user_prompt ? ( $user_prompt . "\n\n" . $tech_prompt ) : $tech_prompt;
 
-        $endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( $model ) . ':generateContent?key=' . rawurlencode( $api_key );
+        $endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( $model ) . ':generateContent';
         $chunks   = array_chunk( $dictionary, 40, true );
         $result   = [];
 
@@ -444,24 +445,21 @@ final class TranslatorAPI {
                 ],
             ];
 
-            $response = wp_remote_post( $endpoint, [
+            $request_args = [
                 'timeout' => 60,
                 'headers' => [
-                    'Content-Type' => 'application/json',
+                    'Content-Type'   => 'application/json',
+                    'x-goog-api-key' => $api_key,
                 ],
                 'body'    => (string) wp_json_encode( $payload ),
-            ] );
+            ];
+
+            $response = wp_remote_post( $endpoint, $request_args );
 
             // Повторная попытка при временной ошибке 429 / 503
             if ( ! is_wp_error( $response ) && in_array( (int) wp_remote_retrieve_response_code( $response ), [ 429, 503 ], true ) ) {
                 sleep( 2 );
-                $response = wp_remote_post( $endpoint, [
-                    'timeout' => 60,
-                    'headers' => [
-                        'Content-Type' => 'application/json',
-                    ],
-                    'body'    => (string) wp_json_encode( $payload ),
-                ] );
+                $response = wp_remote_post( $endpoint, $request_args );
             }
 
             if ( is_wp_error( $response ) ) {

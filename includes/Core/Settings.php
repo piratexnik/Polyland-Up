@@ -43,6 +43,7 @@ final class Settings {
         add_action( 'admin_init', [ self::class, 'register_settings' ] );
         add_action( 'admin_enqueue_scripts', [ self::class, 'enqueue_assets' ] );
         add_action( 'wp_ajax_plu_test_api', [ self::class, 'ajax_test_api' ] );
+        add_action( 'wp_ajax_plu_fetch_gemini_models', [ self::class, 'ajax_fetch_gemini_models' ] );
         add_filter( 'plugin_action_links_' . PLU_BASENAME, [ self::class, 'add_action_links' ] );
     }
 
@@ -358,19 +359,29 @@ final class Settings {
     public static function render_field_gemini_model(): void {
         $model = (string) plu_get_option( 'gemini_model', self::get_default( 'gemini_model' ) );
         ?>
-        <input
-            type="text"
-            name="<?php echo esc_attr( self::OPTION_NAME ); ?>[gemini_model]"
-            id="plu_gemini_model"
-            list="plu-gemini-models"
-            value="<?php echo esc_attr( $model ); ?>"
-            class="regular-text"
-        />
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+            <input
+                type="text"
+                name="<?php echo esc_attr( self::OPTION_NAME ); ?>[gemini_model]"
+                id="plu_gemini_model"
+                list="plu-gemini-models"
+                value="<?php echo esc_attr( $model ); ?>"
+                class="regular-text"
+            />
+            <button type="button" id="plu-fetch-models-btn" class="button button-secondary">
+                <?php esc_html_e( '📋 Загрузить доступные модели по ключу', 'polyland-up' ); ?>
+            </button>
+            <span class="spinner" id="plu-fetch-models-spinner" style="float: none; margin: 0;"></span>
+        </div>
         <datalist id="plu-gemini-models">
-            <option value="gemini-2.5-flash"></option>
+            <option value="gemini-3.8-flash"></option>
+            <option value="gemini-3.6-flash"></option>
             <option value="gemini-2.5-pro"></option>
-            <option value="gemini-2.0-flash"></option>
+            <option value="gemini-2.5-flash"></option>
+            <option value="gemini-3.5-flash-lite"></option>
+            <option value="gemini-4-hydrogen"></option>
         </datalist>
+        <div id="plu-models-list-result" style="margin-top:8px;"></div>
         <p class="description">
             <?php esc_html_e( 'Выберите модель из списка или введите любое кастомное имя модели Google Gemini.', 'polyland-up' ); ?>
         </p>
@@ -634,24 +645,135 @@ final class Settings {
     }
 
     /**
+     * AJAX-обработчик загрузки списка доступных моделей Google Gemini по API-ключу.
+     */
+    public static function ajax_fetch_gemini_models(): void {
+        check_ajax_referer( 'plu_admin_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [
+                'message' => __( 'У вас недостаточно прав для выполнения этого действия.', 'polyland-up' ),
+            ] );
+        }
+
+        $api_key = trim( sanitize_text_field( wp_unslash( (string) ( $_POST['api_key'] ?? '' ) ) ) );
+        if ( '' === $api_key ) {
+            $api_key = trim( (string) plu_get_option( 'gemini_api_key', '' ) );
+        }
+
+        if ( '' === $api_key ) {
+            wp_send_json_error( [
+                'message' => __( 'API-ключ Gemini не указан. Введите ключ Google AI Studio в поле выше.', 'polyland-up' ),
+            ] );
+        }
+
+        $url = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=100';
+        $response = wp_remote_get( $url, [
+            'timeout' => 15,
+            'headers' => [
+                'Content-Type'   => 'application/json',
+                'x-goog-api-key' => $api_key,
+            ],
+        ] );
+
+        if ( is_wp_error( $response ) ) {
+            wp_send_json_error( [
+                'message' => sprintf(
+                    __( 'Сетевая ошибка при загрузке моделей Gemini: %s', 'polyland-up' ),
+                    $response->get_error_message()
+                ),
+            ] );
+        }
+
+        $code = (int) wp_remote_retrieve_response_code( $response );
+        $body = (string) wp_remote_retrieve_body( $response );
+        $data = json_decode( $body, true );
+
+        if ( 200 !== $code || ! is_array( $data ) ) {
+            $error_message = is_array( $data ) ? (string) ( $data['error']['message'] ?? '' ) : '';
+            wp_send_json_error( [
+                'message' => sprintf(
+                    __( 'Ошибка Gemini API (HTTP %1$d): %2$s', 'polyland-up' ),
+                    $code,
+                    '' !== $error_message ? $error_message : __( 'Не удалось получить список моделей.', 'polyland-up' )
+                ),
+            ] );
+        }
+
+        $raw_models = is_array( $data['models'] ?? null ) ? $data['models'] : [];
+        $models     = [];
+        $excluded   = [ 'embedding', 'imagen', 'veo', 'audio', 'tts', 'aqa' ];
+
+        foreach ( $raw_models as $item ) {
+            if ( ! is_array( $item ) || empty( $item['name'] ) ) {
+                continue;
+            }
+
+            $methods = is_array( $item['supportedGenerationMethods'] ?? null ) ? $item['supportedGenerationMethods'] : [];
+            if ( ! in_array( 'generateContent', $methods, true ) ) {
+                continue;
+            }
+
+            $clean_id     = (string) preg_replace( '#^models/#i', '', trim( (string) $item['name'] ) );
+            $display_name = (string) ( $item['displayName'] ?? $clean_id );
+            $haystack     = strtolower( $clean_id . ' ' . $display_name );
+
+            $is_excluded = false;
+            foreach ( $excluded as $marker ) {
+                if ( str_contains( $haystack, $marker ) ) {
+                    $is_excluded = true;
+                    break;
+                }
+            }
+
+            if ( $is_excluded || '' === $clean_id ) {
+                continue;
+            }
+
+            $models[] = [
+                'id'              => $clean_id,
+                'displayName'     => $display_name,
+                'inputTokenLimit' => (int) ( $item['inputTokenLimit'] ?? 0 ),
+            ];
+        }
+
+        if ( empty( $models ) ) {
+            wp_send_json_error( [
+                'message' => __( 'Не найдено ни одной текстовой модели с поддержкой generateContent для данного ключа.', 'polyland-up' ),
+            ] );
+        }
+
+        wp_send_json_success( [
+            'models' => $models,
+            'count'  => count( $models ),
+        ] );
+    }
+
+    /**
      * Тестирование Google Gemini API.
      *
      * @param string $api_key Ключ Google AI Studio.
      * @param string $model   Имя модели.
      */
     private static function test_gemini_api( string $api_key, string $model ): void {
+        $api_key = trim( $api_key );
         // Если ключ не передан в форме, проверяем сохраненный в БД
         if ( '' === $api_key ) {
-            $api_key = (string) plu_get_option( 'gemini_api_key', '' );
+            $api_key = trim( (string) plu_get_option( 'gemini_api_key', '' ) );
         }
 
         if ( '' === $api_key ) {
             wp_send_json_error( [
-                'message' => esc_html__( 'API-ключ Gemini не указан. Введите ключ Google AI Studio в поле выше.', 'polyland-up' ),
+                'message' => __( 'API-ключ Gemini не указан. Введите ключ Google AI Studio в поле выше.', 'polyland-up' ),
             ] );
         }
 
-        $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( $model ) . ':generateContent?key=' . rawurlencode( $api_key );
+        $clean_model = (string) preg_replace( '#^models/#i', '', trim( $model ) );
+        if ( '' === $clean_model ) {
+            $clean_model = 'gemini-2.5-flash';
+        }
+
+        $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( $clean_model ) . ':generateContent';
 
         $payload = [
             'contents' => [
@@ -673,7 +795,8 @@ final class Settings {
         $response = wp_remote_post( $url, [
             'timeout' => 15,
             'headers' => [
-                'Content-Type' => 'application/json',
+                'Content-Type'   => 'application/json',
+                'x-goog-api-key' => $api_key,
             ],
             'body'    => wp_json_encode( $payload ),
         ] );
@@ -682,7 +805,7 @@ final class Settings {
         if ( is_wp_error( $response ) ) {
             wp_send_json_error( [
                 'message' => sprintf(
-                    esc_html__( 'Сетевая ошибка при запросе к Gemini API: %s', 'polyland-up' ),
+                    __( 'Сетевая ошибка при запросе к Gemini API: %s', 'polyland-up' ),
                     $response->get_error_message()
                 ),
                 'time_ms' => $elapsed,
@@ -704,47 +827,47 @@ final class Settings {
 
             wp_send_json_success( [
                 'engine'     => 'Google Gemini API',
-                'model'      => $model,
+                'model'      => $clean_model,
                 'translated' => $translated,
                 'time_ms'    => $elapsed,
                 'message'    => sprintf(
-                    esc_html__( 'Модель %s успешно ответила за %d мс.', 'polyland-up' ),
-                    esc_html( $model ),
+                    __( 'Модель %1$s успешно ответила за %2$d мс.', 'polyland-up' ),
+                    $clean_model,
                     $elapsed
                 ),
             ] );
         }
 
-        // Обработка ошибок Google API
-        $error_message = $data['error']['message'] ?? '';
-        $error_status  = $data['error']['status'] ?? '';
+        // Обработка ошибок Google API (без двойного esc_html)
+        $error_message = is_array( $data ) ? (string) ( $data['error']['message'] ?? '' ) : '';
+        $error_status  = is_array( $data ) ? (string) ( $data['error']['status'] ?? '' ) : '';
 
         if ( 400 === $code ) {
             $desc = sprintf(
-                esc_html__( 'Некорректный запрос (HTTP 400): %s', 'polyland-up' ),
-                esc_html( $error_message ?: 'Проверьте структуру запроса или имя модели.' )
+                __( 'Некорректный запрос (HTTP 400): %s', 'polyland-up' ),
+                '' !== $error_message ? $error_message : __( 'Проверьте структуру запроса или имя модели.', 'polyland-up' )
             );
         } elseif ( 403 === $code || 'PERMISSION_DENIED' === $error_status ) {
             $desc = sprintf(
-                esc_html__( 'Ошибка доступа (HTTP 403): Неверный API-ключ или доступ к модели %s ограничен. Детали: %s', 'polyland-up' ),
-                esc_html( $model ),
-                esc_html( $error_message )
+                __( 'Ошибка доступа (HTTP 403): Неверный API-ключ или доступ к модели %1$s ограничен. Детали: %2$s', 'polyland-up' ),
+                $clean_model,
+                $error_message
             );
         } elseif ( 404 === $code || 'NOT_FOUND' === $error_status ) {
             $desc = sprintf(
-                esc_html__( 'Модель не найдена (HTTP 404): Модель "%s" не поддерживается в v1beta API. Выберите gemini-2.5-flash или gemini-2.0-flash.', 'polyland-up' ),
-                esc_html( $model )
+                __( 'Модель не найдена (HTTP 404): %s', 'polyland-up' ),
+                '' !== $error_message ? $error_message : sprintf( __( 'Модель "%s" не найдена в v1beta API.', 'polyland-up' ), $clean_model )
             );
         } elseif ( 429 === $code || 'RESOURCE_EXHAUSTED' === $error_status ) {
             $desc = sprintf(
-                esc_html__( 'Превышен лимит запросов (HTTP 429): %s', 'polyland-up' ),
-                esc_html( $error_message )
+                __( 'Превышен лимит запросов (HTTP 429): %s', 'polyland-up' ),
+                $error_message
             );
         } else {
             $desc = sprintf(
-                esc_html__( 'Ошибка Gemini API (HTTP %d): %s', 'polyland-up' ),
+                __( 'Ошибка Gemini API (HTTP %1$d): %2$s', 'polyland-up' ),
                 $code,
-                esc_html( $error_message ?: 'Неизвестный сбой.' )
+                '' !== $error_message ? $error_message : __( 'Неизвестный сбой.', 'polyland-up' )
             );
         }
 

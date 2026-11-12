@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `1.8`
+- **Текущая версия:** `1.9`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -39,7 +39,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '1.8'
+- `PLU_VERSION` — '1.9'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -60,7 +60,7 @@ plu_get_option( string $key, mixed $default = '' ): mixed
 | `enable_same_slug` | int (0/1) | `1` | Разрешить идентичные URL-слаги (Same Slug) между языками (например, `/en/about/` и `/ru/about/`). |
 | `default_translator` | string | `'gtx'` | Движок перевода по умолчанию: `gtx` (Google Translate Free) или `gemini` (Google AI Studio). |
 | `gemini_api_key` | string | `''` | API-ключ Gemini от Google AI Studio. |
-| `gemini_model` | string | `'gemini-2.5-flash'` | Рабочая модель Gemini (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.0-flash` или кастомная). |
+| `gemini_model` | string | `'gemini-2.5-flash'` | Рабочая модель Gemini (`gemini-3.8-flash`, `gemini-2.5-flash`, `gemini-2.5-pro` или кастомная). |
 | `system_prompt` | string | *(SEO промпт)* | Системный промпт и глоссарий для качественного сохранения HTML, шорткодов Divi 5 и переменных Rank Math. |
 | `github_token` | string | `''` | GitHub Personal Access Token для авторизации запросов к приватным репозиториям. |
 
@@ -95,7 +95,8 @@ plu_get_option( string $key, mixed $default = '' ): mixed
   2. `translate.googleapis.com/translate_a/single?client=gtx` (Google GTX / gtx).
   3. `api.mymemory.translated.net/get` (MyMemory API Fallback).
   При HTTP 429 или ошибке канала система автоматически переключается на следующий узел и выводит канал, через который прошел ответ, и задержку в миллисекундах.
-- **Для Gemini API:** отправляется запрос `models/{model}:generateContent` с минимальным JSON-payload. При успехе возвращается перевод и время отклика модели, при ошибке (400, 403, 404, 429) парсится `error.message` Google API и выводится понятная причина на русском языке.
+- **Для Gemini API:** отправляется запрос `v1beta/models/{model}:generateContent` с передачей ключа строго в заголовке `x-goog-api-key` (поддержка новых ключей `AQ.Ab...` и `AIza...`) и очисткой префикса `models/`. При успехе возвращается перевод и время отклика модели, при ошибке (400, 403, 404, 429) парсится реальный `error.message` Google API и выводится понятная причина без двойного экранирования.
+- **Загрузка доступных моделей:** кнопка **«📋 Загрузить доступные модели по ключу»** (`wp_ajax_plu_fetch_gemini_models`) запрашивает `v1beta/models?pageSize=100` с заголовком `x-goog-api-key`, фильтрует модели по `generateContent` (исключая `embedding`, `imagen`, `veo`, `audio`, `tts`, `aqa`), обновляет `<datalist>` и выводит кликабельные чипсы для быстрой подстановки в поле модели.
 - Проверка работает по текущим значениям полей на форме даже до сохранения настроек в базу данных.
 
 ---

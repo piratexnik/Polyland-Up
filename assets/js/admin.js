@@ -100,6 +100,90 @@
             });
         }
 
+        // Загрузка доступных моделей Gemini по API-ключу
+        const $btnFetchModels = $('#plu-fetch-models-btn');
+        if ($btnFetchModels.length) {
+            const $modelsSpinner = $('#plu-fetch-models-spinner');
+            const $modelsResult = $('#plu-models-list-result');
+            const $modelInput = $('#plu_gemini_model, #gemini_model');
+            const $datalist = $('#plu-gemini-models');
+
+            $btnFetchModels.on('click', function(e) {
+                e.preventDefault();
+                const apiKey = $('#plu_gemini_api_key').val() || '';
+
+                $btnFetchModels.prop('disabled', true);
+                $modelsSpinner.addClass('is-active');
+                $modelsResult.empty();
+
+                $.ajax({
+                    url: pluAdminData.ajax_url,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: {
+                        action: 'plu_fetch_gemini_models',
+                        nonce: pluAdminData.nonce,
+                        api_key: apiKey
+                    },
+                    success: function(response) {
+                        if (response.success && response.data && Array.isArray(response.data.models)) {
+                            const models = response.data.models;
+                            const currentVal = String($modelInput.val() || '').trim();
+
+                            // Обновляем datalist
+                            if ($datalist.length) {
+                                $datalist.empty();
+                                models.forEach(function(m) {
+                                    $datalist.append(`<option value="${esc(m.id)}"></option>`);
+                                });
+                            }
+
+                            // Отрисовываем кликабельные чипсы
+                            const chipsHtml = models.map(function(m) {
+                                const isActive = (m.id === currentVal) ? ' is-active' : '';
+                                const limitStr = m.inputTokenLimit ? ` (${Math.round(m.inputTokenLimit / 1000)}K tokens)` : '';
+                                const titleAttr = `${m.displayName || m.id}${limitStr}`;
+                                return `<button type="button" class="plu-model-chip${isActive}" data-model="${esc(m.id)}" title="${esc(titleAttr)}">${esc(m.id)}</button>`;
+                            }).join('');
+
+                            $modelsResult.html(`
+                                <div class="plu-models-chips-header">Найдено моделей: <strong>${esc(models.length)}</strong> (кликните для выбора):</div>
+                                <div class="plu-models-chips">${chipsHtml}</div>
+                            `);
+                        } else {
+                            const msg = (response.data && response.data.message) ? response.data.message : 'Не удалось загрузить модели.';
+                            $modelsResult.html(`
+                                <div class="plu-api-test-box plu-api-test-error">
+                                    <strong>&#9888; Ошибка:</strong> ${esc(msg)}
+                                </div>
+                            `);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        $modelsResult.html(`
+                            <div class="plu-api-test-box plu-api-test-error">
+                                <strong>&#9888; Сетевая ошибка:</strong> ${esc(error || status)} (код ${esc(xhr.status || 500)})
+                            </div>
+                        `);
+                    },
+                    complete: function() {
+                        $btnFetchModels.prop('disabled', false);
+                        $modelsSpinner.removeClass('is-active');
+                    }
+                });
+            });
+
+            $modelsResult.on('click', '.plu-model-chip', function(e) {
+                e.preventDefault();
+                const selectedModel = String($(this).attr('data-model') || '');
+                if (selectedModel) {
+                    $modelInput.val(selectedModel).trigger('change');
+                    $modelsResult.find('.plu-model-chip').removeClass('is-active');
+                    $(this).addClass('is-active');
+                }
+            });
+        }
+
         // ============================================================
         // 2. Логика метабокса в редакторе записей (AI Дубликатор)
         // ============================================================
