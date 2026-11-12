@@ -141,11 +141,11 @@ plu_get_option( string $key, mixed $default = '' ): mixed
    - Извлекает `post_title`, `post_excerpt` и метаполя `rank_math_title`, `rank_math_description`, `rank_math_focus_keyword` (пропуская строки, состоящие исключительно из технических переменных `%title% %sep% %sitename%`).
 2. **Divi 5 (Gutenberg JSON-блоки):**
    - Использует `parse_blocks()` и `serialize_blocks()` с предварительной очисткой битых UTF-8 последовательностей и сохранением экранирования `\"` через `wp_slash()` на этапе сохранения поста.
-   - Полностью игнорирует блоки `divi/code`, `divi/fullwidth-code`, `core/code` и технические ветки атрибутов (`decoration`, `advanced`, `builderVersion`, `css`, `meta`, `font`, `background`, `border`, `spacing`, `link`, `adminLabel`, `socialNetwork`, `modulePreset` и др.).
+   - Полностью игнорирует `core/code` и технические ветки атрибутов (`decoration`, `advanced`, `builderVersion`, `css`, `meta`, `font`, `background`, `border`, `spacing`, `link`, `adminLabel`, `socialNetwork`, `modulePreset` и др.), **за исключением** панели `attributes` (внутри `decoration`/`advanced`): если элемент содержит `attributeName` (`title`, `alt`, `aria-label`, `placeholder`, `data-title`, `data-caption`, `label`) и `attributeValue`, значение переводится и подставляется обратно.
    - Извлекает строки из `innerContent -> {desktop|tablet|phone} -> {value|hover}` и белого списка ключей (`text`, `title`, `heading`, `subhead`, `buttonText`, `alt`, `titleText`, `caption`, `description`, `label`, `placeholder` и др.), а также из `innerContent` / `innerHTML` без дублирования запросов.
-3. **HTML, `<img alt/title>` и Divi 4 шорткоды:**
-   - Изолирует блоки `<script>`, `<style>`, `<svg>`, чтобы не передавать код в переводчик.
-   - Отдельно извлекает и принудительно обновляет атрибуты `alt` и `title` внутри тегов `<img ...>`.
+3. **HTML, `divi/code`, `<img alt/title>` и Divi 4 шорткоды:**
+   - Изолирует блоки `<script>`, `<style>`, `<svg>` и HTML-комментарии `<!-- ... -->`, чтобы не передавать код в переводчик.
+   - Для блоков `divi/code`, `divi/fullwidth-code`, `core/html` и крупных HTML-фрагментов (>800 байт) применяет поузловой токенизатор: переводит текстовые узлы и атрибуты `alt`/`title`/`placeholder`/`aria-label` раздельно без превышения лимита GTX и без искажения HTML-структуры.
    - Посимвольный токенизатор шорткодов `[et_pb_...]` переводит разрешенные атрибуты (`title`, `button_text`, `subhead`, `alt`, `heading` и др.) с безопасным экранированием `"`, `[`, `]`, игнорируя содержимое `[et_pb_code]` и `[et_pb_fullwidth_code]`.
 4. **Строгая фильтрация (`is_translatable_string`):**
    - Отсекает URL-ы, пути, домены, имена файлов, CSS-значения/цвета/единицы, JSON-строки, булевы/технические константы (`on`, `off`, `true`, `false`, `h1`–`h6`, `left`/`center`/`right`), snake_case идентификаторы и строки без букв (`\p{L}`).
@@ -163,4 +163,20 @@ plu_get_option( string $key, mixed $default = '' ): mixed
 3. **Провайдер 2 — Google Gemini AI (`translate_via_gemini`):**
    - Разбивает словарь на чанки по 40 элементов и отправляет POST в `v1beta/models/{model}:generateContent` (`responseMimeType: application/json`, `temperature: 0.2`, таймаут 60 сек) с пользовательским `system_prompt` и инструкцией сохранения ключей/тегов/Rank Math переменных.
    - Повторяет запрос при HTTP 429/503, очищает возможные markdown-обертки ` ```json ` и сохраняет оригиналы при сбое отдельного ключа.
+
+---
+
+## 10. Умная перелинковка внутренних ссылок (`LinkRewriter.php`)
+Вызывается в `MetaboxUI::duplicate_post_to_language()` при активном флаге `rewrite_links` и подсчитывает количество измененных ссылок (`get_last_rewritten_count()`):
+1. **Точки поиска ссылок (`rewrite_content`):**
+   - Атрибуты `href="..."` внутри тегов `<a>` в HTML-контенте.
+   - Ключи ссылок в JSON-атрибутах блоков Divi 5 (`url`, `linkUrl`, `buttonUrl`, `titleUrl`, `imageUrl`, `buttonOneUrl`, `buttonTwoUrl`, `logoUrl`, `readMoreUrl`), исключая медиа-контекст (`background`, `video`, `audio`).
+   - Атрибуты шорткодов Divi 4 (`url`, `button_url`, `link_url`, `button_one_url`, `button_two_url`, `title_link_url`).
+2. **Фильтрация (`is_rewritable_internal_url`):**
+   - Пропускает внешние домены, пустые ссылки, `#якоря`, не-HTTP схемы (`mailto:`, `tel:`, `javascript:`), системные пути (`/wp-content/uploads/`, `/wp-admin/`, `/wp-login.php`, `/wp-json/`) и ссылки на файлы/медиа (`.jpg`, `.png`, `.svg`, `.webp`, `.pdf`, `.zip`, `.mp4` и др.).
+3. **Алгоритм замены (`rewrite_url`):**
+   - Сохраняет `?query` и `#fragment`, а также относительность/абсолютность исходного URL.
+   - Определяет ID записи через `url_to_postid()` и запасной резолвер `SameSlug::resolve_post_by_path_and_lang()`.
+   - Если запись найдена и существует перевод `pll_get_post( $id, $target_lang )` — подставляет реальный `get_permalink( $translated_id )`.
+   - Если перевода еще нет — переключает языковой префикс через `PLL()->links_model->switch_language_in_link()` или ручной разбор пути с учетом `pll_default_language` и `hide_default`.
 

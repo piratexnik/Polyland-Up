@@ -539,10 +539,11 @@ final class MetaboxUI {
             'edit_url'            => (string) get_edit_post_link( $new_post_id, 'raw' ),
             'view_url'            => $view_url,
             'divi_url'            => add_query_arg( 'et_fb', '1', $view_url ),
-            'notes'               => $notes,
-            'translated_count'    => $translated_count,
-            'translation_stats'   => $translation_stats,
-            'translation_summary' => $translation_summary,
+            'notes'                 => $notes,
+            'translated_count'      => $translated_count,
+            'rewritten_links_count' => $rewritten_links_count,
+            'translation_stats'     => $translation_stats,
+            'translation_summary'   => $translation_summary,
         ];
     }
 

@@ -19,14 +19,12 @@ final class DiviParser {
      * @var string[]
      */
     private const SKIP_BLOCKS = [
-        'divi/code',
-        'divi/fullwidth-code',
         'core/code',
     ];
 
     /**
      * Ветки атрибутов Divi 5, содержащие только стили, позиционирование и служебные настройки.
-     * Их поддеревья пропускаются целиком.
+     * Их поддеревья пропускаются целиком (за исключением вложенных attributes, обрабатываемых отдельно).
      *
      * @var string[]
      */
@@ -53,7 +51,6 @@ final class DiviParser {
         'overflow',
         'link',
         'idClasses',
-        'attributes',
         'conditions',
         'transition',
         'icon',
@@ -96,12 +93,26 @@ final class DiviParser {
     ];
 
     /**
+     * Имена кастомных HTML-атрибутов в панели Divi 5 Attributes, чье attributeValue подлежит переводу.
+     *
+     * @var string[]
+     */
+    private const TRANSLATABLE_CUSTOM_ATTR_NAMES = [
+        'title',
+        'alt',
+        'aria-label',
+        'placeholder',
+        'data-title',
+        'data-caption',
+        'label',
+    ];
+
+    /**
      * Родительские ключи перед innerContent, чьи прямые строковые значения являются техническими.
      *
      * @var string[]
      */
     private const TECHNICAL_INNER_PARENTS = [
-        'code',
         'customCss',
         'adminLabel',
         'video',
@@ -571,12 +582,13 @@ final class DiviParser {
                 continue;
             }
 
-            $block_recipe = [];
+            $block_recipe          = [];
+            $is_code_or_html_block = in_array( $block_name, [ 'divi/code', 'divi/fullwidth-code', 'core/html' ], true );
 
             // 1. Атрибуты блока (основное хранилище данных в Divi 5 JSON)
             if ( ! empty( $block['attrs'] ) && is_array( $block['attrs'] ) ) {
                 $attr_recipes = [];
-                self::walk_divi_attrs( $block['attrs'], [], $attr_recipes, $state );
+                self::walk_divi_attrs( $block['attrs'], [], $attr_recipes, $state, $is_code_or_html_block );
                 if ( ! empty( $attr_recipes ) ) {
                     $block_recipe['attrs'] = $attr_recipes;
                 }
@@ -591,7 +603,7 @@ final class DiviParser {
                         continue;
                     }
                     $has_string_inner_content = true;
-                    $rich                     = self::extract_rich_string( $chunk, $state, true );
+                    $rich                     = self::extract_rich_string( $chunk, $state, true, $is_code_or_html_block );
                     if ( null !== $rich ) {
                         $ic_recipes[ $ic_idx ] = $rich;
                     }
@@ -603,7 +615,7 @@ final class DiviParser {
 
             // Если innerContent не содержит строк, проверяем innerHTML как запасной источник
             if ( ! $has_string_inner_content && ! empty( $block['innerHTML'] ) && is_string( $block['innerHTML'] ) ) {
-                $rich = self::extract_rich_string( $block['innerHTML'], $state, true );
+                $rich = self::extract_rich_string( $block['innerHTML'], $state, true, $is_code_or_html_block );
                 if ( null !== $rich ) {
                     $block_recipe['innerHTML'] = $rich;
                 }
@@ -628,21 +640,77 @@ final class DiviParser {
     /**
      * Рекурсивный обход JSON-атрибутов блока Divi 5 / Gutenberg.
      *
-     * @param array<string|int, mixed> $node         Текущий узел массива attrs.
-     * @param array<int, string|int>   $path         Путь ключей от корня attrs.
-     * @param array<int, array<string, mixed>> $attr_recipes Собираемый список рецептов замены.
-     * @param array<string, mixed>     $state        Состояние словаря.
+     * @param array<string|int, mixed>         $node                  Текущий узел массива attrs.
+     * @param array<int, string|int>           $path                  Путь ключей от корня attrs.
+     * @param array<int, array<string, mixed>> $attr_recipes          Собираемый список рецептов замены.
+     * @param array<string, mixed>             $state                 Состояние словаря.
+     * @param bool                             $is_code_or_html_block Флаг блока с сырым HTML/CSS (divi/code, core/html).
      */
     private static function walk_divi_attrs(
         array $node,
         array $path,
         array &$attr_recipes,
-        array &$state
+        array &$state,
+        bool $is_code_or_html_block = false
     ): void {
+        // Специальная обработка элементов панели Custom Attributes в Divi 5:
+        // { "attributeName": "title", "attributeValue": "Текст", "adminLabel": "..." }
+        if (
+            isset( $node['attributeName'], $node['attributeValue'] )
+            && is_string( $node['attributeName'] )
+            && is_string( $node['attributeValue'] )
+        ) {
+            $attr_name = strtolower( trim( $node['attributeName'] ) );
+            if ( in_array( $attr_name, self::TRANSLATABLE_CUSTOM_ATTR_NAMES, true ) ) {
+                $rich = self::extract_rich_string( $node['attributeValue'], $state, true, false );
+                if ( null !== $rich ) {
+                    $attr_recipes[] = [
+                        'path'   => array_merge( $path, [ 'attributeValue' ] ),
+                        'recipe' => $rich,
+                    ];
+                }
+            }
+            return;
+        }
+
+        // Альтернативный формат элементов внутри ветки attributes: { "name": "title", "value": "Текст" }
+        if (
+            in_array( 'attributes', $path, true )
+            && isset( $node['name'], $node['value'] )
+            && is_string( $node['name'] )
+            && is_string( $node['value'] )
+        ) {
+            $attr_name = strtolower( trim( $node['name'] ) );
+            if ( in_array( $attr_name, self::TRANSLATABLE_CUSTOM_ATTR_NAMES, true ) ) {
+                $rich = self::extract_rich_string( $node['value'], $state, true, false );
+                if ( null !== $rich ) {
+                    $attr_recipes[] = [
+                        'path'   => array_merge( $path, [ 'value' ] ),
+                        'recipe' => $rich,
+                    ];
+                }
+            }
+            return;
+        }
+
         foreach ( $node as $key => $value ) {
             $str_key = (string) $key;
 
-            // Пропускаем исключенные технические/стилистические ветки целиком
+            // В ветках decoration и advanced пропускаем все стили, КРОМЕ вложенной панели attributes
+            if ( in_array( $str_key, [ 'decoration', 'advanced' ], true ) ) {
+                if ( is_array( $value ) && isset( $value['attributes'] ) && is_array( $value['attributes'] ) ) {
+                    self::walk_divi_attrs(
+                        $value['attributes'],
+                        array_merge( $path, [ $key, 'attributes' ] ),
+                        $attr_recipes,
+                        $state,
+                        $is_code_or_html_block
+                    );
+                }
+                continue;
+            }
+
+            // Пропускаем остальные исключенные технические/стилистические ветки целиком
             if ( in_array( $str_key, self::EXCLUDED_ATTR_BRANCHES, true ) ) {
                 continue;
             }
@@ -650,7 +718,7 @@ final class DiviParser {
             $current_path = array_merge( $path, [ $key ] );
 
             if ( is_array( $value ) ) {
-                self::walk_divi_attrs( $value, $current_path, $attr_recipes, $state );
+                self::walk_divi_attrs( $value, $current_path, $attr_recipes, $state, $is_code_or_html_block );
                 continue;
             }
 
@@ -662,7 +730,7 @@ final class DiviParser {
                 continue;
             }
 
-            $rich = self::extract_rich_string( $value, $state, true );
+            $rich = self::extract_rich_string( $value, $state, true, $is_code_or_html_block );
             if ( null !== $rich ) {
                 $attr_recipes[] = [
                     'path'   => $current_path,
@@ -791,15 +859,21 @@ final class DiviParser {
     }
 
     /**
-     * Анализирует строку (поддерживает шорткоды Divi 4, HTML с <img alt/title> и <script>/<style>).
+     * Анализирует строку (поддерживает шорткоды Divi 4, HTML с <img alt/title> и <script>/<style>/<svg>).
      * Возвращает null, если в строке нет переводимых элементов.
      *
-     * @param string $raw              Исходная строка.
-     * @param array<string, mixed> $state Состояние словаря.
-     * @param bool   $parse_shortcodes Разбирать ли шорткоды Divi 4 [et_pb_...].
+     * @param string               $raw              Исходная строка.
+     * @param array<string, mixed> $state            Состояние словаря.
+     * @param bool                 $parse_shortcodes Разбирать ли шорткоды Divi 4 [et_pb_...].
+     * @param bool                 $granular_html    Разбивать ли HTML по текстовым узлам (для divi/code и core/html).
      * @return array<string, mixed>|null
      */
-    private static function extract_rich_string( string $raw, array &$state, bool $parse_shortcodes = true ): ?array {
+    private static function extract_rich_string(
+        string $raw,
+        array &$state,
+        bool $parse_shortcodes = true,
+        bool $granular_html = false
+    ): ?array {
         if ( '' === trim( $raw ) ) {
             return null;
         }
@@ -810,7 +884,7 @@ final class DiviParser {
         if ( $parse_shortcodes && str_contains( $raw, '[et_pb_' ) ) {
             $segments = self::extract_shortcode_segments( $raw, $state );
         } else {
-            $segments = self::extract_html_segments( $raw, $state );
+            $segments = self::extract_html_segments( $raw, $state, $granular_html );
         }
 
         // Если ни один ключ словаря не был зарегистрирован — строка не требует перевода
@@ -844,6 +918,18 @@ final class DiviParser {
 
             if ( 'raw' === $kind ) {
                 $out .= (string) ( $seg['text'] ?? '' );
+                continue;
+            }
+
+            if ( 'text_node' === $kind ) {
+                $key  = (string) ( $seg['key'] ?? '' );
+                $val  = $translated_dict[ $key ] ?? (string) ( $seg['original'] ?? '' );
+                $out .= (string) ( $seg['prefix'] ?? '' ) . $val . (string) ( $seg['suffix'] ?? '' );
+                continue;
+            }
+
+            if ( 'html_tag' === $kind ) {
+                $out .= self::rebuild_html_tag_attrs( $seg, $translated_dict );
                 continue;
             }
 
@@ -1083,49 +1169,192 @@ final class DiviParser {
     }
 
     /**
-     * Разбивает HTML на безопасные части, изолируя <script>, <style> и <svg>.
+     * Разбивает HTML на безопасные части, изолируя <script>, <style>, <svg> и HTML-комментарии.
+     * Для divi/code, core/html и длинного HTML применяет поузловой разбор текста и атрибутов.
      *
-     * @param string               $html  HTML-строка.
-     * @param array<string, mixed> $state Состояние словаря.
+     * @param string               $html          HTML-строка.
+     * @param array<string, mixed> $state         Состояние словаря.
+     * @param bool                 $granular_html Принудительно разбирать HTML по текстовым узлам.
      * @return array<int, array<string, mixed>>
      */
-    private static function extract_html_segments( string $html, array &$state ): array {
+    private static function extract_html_segments( string $html, array &$state, bool $granular_html = false ): array {
         if ( '' === $html ) {
             return [];
         }
 
         $has_protected_blocks = false !== stripos( $html, '<script' )
             || false !== stripos( $html, '<style' )
-            || false !== stripos( $html, '<svg' );
+            || false !== stripos( $html, '<svg' )
+            || false !== strpos( $html, '<!--' );
 
         if ( ! $has_protected_blocks ) {
-            return [ self::extract_single_html_chunk( $html, $state ) ];
-        }
+            $parts = [ $html ];
+        } else {
+            $parts = preg_split(
+                '/(<(?:script|style|svg)\b[^>]*>.*?<\/(?:script|style|svg)>|<!--.*?-->)/is',
+                $html,
+                -1,
+                PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY
+            );
 
-        $parts = preg_split(
-            '/(<(?:script|style|svg)\b[^>]*>.*?<\/(?:script|style|svg)>)/is',
-            $html,
-            -1,
-            PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY
-        );
-
-        if ( ! is_array( $parts ) ) {
-            return [ self::extract_single_html_chunk( $html, $state ) ];
+            if ( ! is_array( $parts ) ) {
+                $parts = [ $html ];
+            }
         }
 
         $segments = [];
         foreach ( $parts as $part ) {
-            if ( 1 === preg_match( '/^<(?:script|style|svg)\b/is', $part ) ) {
+            if ( 1 === preg_match( '/^(?:<(?:script|style|svg)\b|<!--)/is', $part ) ) {
                 $segments[] = [
                     'kind' => 'raw',
                     'text' => $part,
                 ];
+                continue;
+            }
+
+            $use_granular = $granular_html
+                || ( strlen( $part ) > 800 && 1 === preg_match( '/<[a-zA-Z][^>]*>/', $part ) );
+
+            if ( $use_granular ) {
+                $segments = array_merge( $segments, self::extract_granular_html_segments( $part, $state ) );
             } else {
                 $segments[] = self::extract_single_html_chunk( $part, $state );
             }
         }
 
         return $segments;
+    }
+
+    /**
+     * Поузловой токенизатор HTML: оставляет теги нетронутыми (переводя только alt/title/placeholder/aria-label),
+     * а текстовые узлы между тегами извлекает по отдельности, чтобы не превышать лимиты GTX.
+     *
+     * @param string               $html  HTML-фрагмент без <style>/<script>/<svg>.
+     * @param array<string, mixed> $state Состояние словаря.
+     * @return array<int, array<string, mixed>>
+     */
+    private static function extract_granular_html_segments( string $html, array &$state ): array {
+        $tokens = preg_split( '/(<[^>]+>)/us', $html, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY );
+        if ( ! is_array( $tokens ) ) {
+            return [ self::extract_single_html_chunk( $html, $state ) ];
+        }
+
+        $segments = [];
+        foreach ( $tokens as $token ) {
+            if ( str_starts_with( $token, '<' ) && str_ends_with( $token, '>' ) ) {
+                $segments[] = self::extract_html_tag_attrs( $token, $state );
+                continue;
+            }
+
+            if ( ! self::is_translatable_string( $token, false ) ) {
+                $segments[] = [
+                    'kind' => 'raw',
+                    'text' => $token,
+                ];
+                continue;
+            }
+
+            // Сохраняем ведущие и завершающие пробелы/переносы строк для точной вёрстки
+            preg_match( '/^(\s*)(.*?)(\s*)$/us', $token, $ws );
+            $prefix = $ws[1] ?? '';
+            $core   = $ws[2] ?? $token;
+            $suffix = $ws[3] ?? '';
+
+            if ( '' === $core || ! self::is_translatable_string( $core, false ) ) {
+                $segments[] = [
+                    'kind' => 'raw',
+                    'text' => $token,
+                ];
+                continue;
+            }
+
+            $segments[] = [
+                'kind'     => 'text_node',
+                'prefix'   => $prefix,
+                'suffix'   => $suffix,
+                'original' => $core,
+                'key'      => self::register_text( $state, $core ),
+            ];
+        }
+
+        return $segments;
+    }
+
+    /**
+     * Извлекает переводимые атрибуты (alt, title, placeholder, aria-label) из одиночного HTML-тега.
+     *
+     * @param string               $tag   HTML-тег вида `<img ...>` или `<input ...>`.
+     * @param array<string, mixed> $state Состояние словаря.
+     * @return array<string, mixed>
+     */
+    private static function extract_html_tag_attrs( string $tag, array &$state ): array {
+        $attr_keys = [];
+
+        if ( preg_match_all( '/(?<=\s)(alt|title|placeholder|aria-label)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/iu', $tag, $matches ) ) {
+            foreach ( $matches[1] as $idx => $attr_name ) {
+                $raw_val = '' !== $matches[2][ $idx ]
+                    ? $matches[2][ $idx ]
+                    : ( $matches[3][ $idx ] ?? '' );
+
+                $decoded = html_entity_decode( $raw_val, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+                if ( self::is_translatable_string( $decoded, false ) ) {
+                    $attr_keys[ strtolower( $attr_name ) ] = self::register_text( $state, $decoded );
+                }
+            }
+        }
+
+        if ( empty( $attr_keys ) ) {
+            return [
+                'kind' => 'raw',
+                'text' => $tag,
+            ];
+        }
+
+        return [
+            'kind'      => 'html_tag',
+            'tag'       => $tag,
+            'attr_keys' => $attr_keys,
+        ];
+    }
+
+    /**
+     * Восстанавливает HTML-тег с переведенными атрибутами alt/title/placeholder/aria-label.
+     *
+     * @param array<string, mixed>  $seg             Дескриптор тега.
+     * @param array<string, string> $translated_dict Переведенный словарь.
+     * @return string
+     */
+    private static function rebuild_html_tag_attrs( array $seg, array $translated_dict ): string {
+        $tag       = (string) ( $seg['tag'] ?? '' );
+        $attr_keys = $seg['attr_keys'] ?? [];
+
+        if ( empty( $attr_keys ) || ! is_array( $attr_keys ) ) {
+            return $tag;
+        }
+
+        return (string) preg_replace_callback(
+            '/(?<=\s)(alt|title|placeholder|aria-label)(\s*=\s*)(?:"([^"]*)"|\'([^\']*)\')/iu',
+            static function ( array $m ) use ( $attr_keys, $translated_dict ): string {
+                $name = strtolower( $m[1] );
+                if ( ! isset( $attr_keys[ $name ] ) ) {
+                    return $m[0];
+                }
+
+                $key = $attr_keys[ $name ];
+                if ( ! isset( $translated_dict[ $key ] ) ) {
+                    return $m[0];
+                }
+
+                $safe = htmlspecialchars(
+                    (string) $translated_dict[ $key ],
+                    ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5,
+                    'UTF-8'
+                );
+
+                return $m[1] . $m[2] . '"' . $safe . '"';
+            },
+            $tag
+        );
     }
 
     /**
