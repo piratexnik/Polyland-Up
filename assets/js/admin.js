@@ -51,30 +51,47 @@
                     model: model
                 },
                 success: function(response) {
+                    const esc = function(str) {
+                        return $('<div>').text(String(str || '')).html();
+                    };
+
                     if (response.success && response.data) {
                         const data = response.data;
-                        const timeMs = data.time_ms ? ' (' + data.time_ms + ' мс)' : '';
-                        const html = `
-                            <div class="plu-api-test-box plu-api-test-success">
-                                <strong>&#10003; ${data.engine}:</strong> ${data.message || 'Соединение успешно.'}
-                                ${data.translated ? `<div class="plu-test-meta">Тестовый перевод: "Connection successful" &rarr; <em>"${data.translated}"</em>${timeMs}</div>` : ''}
-                            </div>
-                        `;
+                        let html = '';
+
+                        if (data.channel) {
+                            html = `
+                                <div class="plu-api-test-box plu-api-test-success">
+                                    <strong>&#9989; ${esc(data.message)}</strong>
+                                </div>
+                            `;
+                        } else {
+                            const timeMs = data.time_ms ? ' (' + esc(data.time_ms) + ' мс)' : '';
+                            html = `
+                                <div class="plu-api-test-box plu-api-test-success">
+                                    <strong>&#9989; ${esc(data.engine)}:</strong> ${esc(data.message || 'Соединение успешно.')}
+                                    ${data.translated ? `<div class="plu-test-meta">Тестовый перевод: "Connection successful" &rarr; <em>"${esc(data.translated)}"</em>${timeMs}</div>` : ''}
+                                </div>
+                            `;
+                        }
                         $resultBox.html(html);
                     } else {
                         const msg = (response.data && response.data.message) ? response.data.message : 'Неизвестная ошибка проверки API.';
                         const html = `
                             <div class="plu-api-test-box plu-api-test-error">
-                                <strong>&#9888; Ошибка проверки:</strong> ${msg}
+                                <strong>&#9888; Ошибка проверки:</strong> ${esc(msg)}
                             </div>
                         `;
                         $resultBox.html(html);
                     }
                 },
                 error: function(xhr, status, error) {
+                    const esc = function(str) {
+                        return $('<div>').text(String(str || '')).html();
+                    };
                     const html = `
                         <div class="plu-api-test-box plu-api-test-error">
-                            <strong>&#9888; Сетевая ошибка сервера:</strong> ${error || status} (код ${xhr.status || 500})
+                            <strong>&#9888; Сетевая ошибка сервера:</strong> ${esc(error || status)} (код ${esc(xhr.status || 500)})
                         </div>
                     `;
                     $resultBox.html(html);

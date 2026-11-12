@@ -39,18 +39,13 @@ final class SameSlug {
         // 1. Генерация уникального слага с учетом языка
         add_filter( 'wp_unique_post_slug', [ self::class, 'filter_unique_post_slug' ], 10, 6 );
 
-        // 2. Разрешение маршрутов на фронтенде (обход get_page_by_path без языка)
+        // 2. Разрешение маршрутов на фронтенде строго в главном запросе (без конфликта с Divi Theme Builder)
         add_filter( 'request', [ self::class, 'filter_request' ], 10, 1 );
-        add_action( 'parse_query', [ self::class, 'fix_parsed_query' ], 1, 1 );
 
-        // 3. Страховка SQL-запросов для обычных записей и CPT по слагам
-        add_filter( 'posts_join', [ self::class, 'filter_posts_join' ], 10, 2 );
-        add_filter( 'posts_where', [ self::class, 'filter_posts_where' ], 10, 2 );
-
-        // 4. Корректировка url_to_postid для внутренних ссылок и парсеров
+        // 3. Корректировка url_to_postid для внутренних ссылок и парсеров
         add_filter( 'url_to_postid', [ self::class, 'filter_url_to_postid' ], 20, 1 );
 
-        // 5. Защита от ложных канонических редиректов Polylang и ядра WP
+        // 4. Защита от ложных канонических редиректов Polylang и ядра WP
         add_filter( 'pll_check_canonical_url', [ self::class, 'filter_pll_canonical_url' ], 10, 2 );
         add_filter( 'redirect_canonical', [ self::class, 'filter_redirect_canonical' ], 10, 2 );
     }
@@ -211,7 +206,7 @@ final class SameSlug {
      * @param string $check_slug  Проверяемый слаг.
      * @param int    $post_ID     ID текущей записи.
      * @param string $post_type   Тип записи.
-     * @param int    $post_parent ID родителя.
+     * @param int    $post_parent ID родительской записи.
      * @param int    $tt_id       term_taxonomy_id языка.
      * @return bool True, если слаг уже занят в этом языке.
      */
@@ -316,10 +311,9 @@ final class SameSlug {
                 return null;
             }
 
-            $is_first     = ( 0 === $index );
+            $is_first      = ( 0 === $index );
             $is_single_seg = ( 1 === count( $segments ) );
 
-            // Для одиночного сегмента не-иерархического типа не требуем post_parent = 0, но для иерархического требуем цепочку от корня
             $query_args = array_merge( [ $segment, $tt_id ], $post_types );
 
             $sql = $wpdb->prepare(
@@ -376,9 +370,10 @@ final class SameSlug {
     }
 
     /**
-     * Определение языка текущего фронтенд-запроса по URL, параметру lang или Polylang.
+     * Определение языка текущего URL строго по языковому префиксу в REQUEST_URI (или $custom_url).
+     * Если префикс не найден, возвращает язык по умолчанию (pll_default_language).
      *
-     * @param array<string, mixed> $query_vars Переменные запроса WP.
+     * @param array<string, mixed> $query_vars Опциональные переменные запроса.
      * @param string|null          $custom_url Опциональный URL для анализа.
      * @return string|null Код языка.
      */
@@ -392,15 +387,7 @@ final class SameSlug {
             return null;
         }
 
-        // 1. Явно переданный lang в query_vars
-        if ( ! empty( $query_vars['lang'] ) && is_string( $query_vars['lang'] ) ) {
-            $q_lang = sanitize_key( $query_vars['lang'] );
-            if ( in_array( $q_lang, $languages, true ) ) {
-                return $q_lang;
-            }
-        }
-
-        // 2. Анализ пути URL на наличие языкового префикса (/en/about/, /ru/about/)
+        // 1. Анализ пути URL на наличие языкового префикса (/en/about/, /ru/about/)
         $uri = $custom_url ?? ( $_SERVER['REQUEST_URI'] ?? '' );
         if ( is_string( $uri ) && '' !== $uri ) {
             $parsed_path = (string) wp_parse_url( $uri, PHP_URL_PATH );
@@ -420,15 +407,15 @@ final class SameSlug {
             }
         }
 
-        // 3. Текущий язык Polylang, если уже инициализирован
-        if ( function_exists( 'pll_current_language' ) ) {
-            $curr = pll_current_language( 'slug' );
-            if ( is_string( $curr ) && in_array( $curr, $languages, true ) ) {
-                return $curr;
+        // 2. Явно переданный lang в query_vars (резервно, если префикса нет)
+        if ( ! empty( $query_vars['lang'] ) && is_string( $query_vars['lang'] ) ) {
+            $q_lang = sanitize_key( $query_vars['lang'] );
+            if ( in_array( $q_lang, $languages, true ) ) {
+                return $q_lang;
             }
         }
 
-        // 4. Язык по умолчанию (особенно когда включена опция hide_default для основного языка)
+        // 3. Язык по умолчанию (основной язык без префикса)
         if ( function_exists( 'pll_default_language' ) ) {
             $def = pll_default_language( 'slug' );
             if ( is_string( $def ) && '' !== $def ) {
@@ -440,7 +427,8 @@ final class SameSlug {
     }
 
     /**
-     * Фильтр request: корректировка переменных запроса до запуска WP_Query::parse_query().
+     * Фильтр request: корректировка переменных главного запроса браузера до запуска WP_Query::parse_query().
+     * Не затрагивает внутренние WP_Query шапки/подвала Divi Theme Builder.
      *
      * @param array<string, mixed> $query_vars Переменные запроса.
      * @return array<string, mixed>
@@ -450,255 +438,102 @@ final class SameSlug {
             return $query_vars;
         }
 
-        $lang = self::detect_request_language( $query_vars );
+        if ( empty( $query_vars['pagename'] ) && empty( $query_vars['name'] ) ) {
+            return $query_vars;
+        }
+
+        // Пропускаем запросы вложений
+        if ( ! empty( $query_vars['attachment'] ) ) {
+            return $query_vars;
+        }
+
+        // Игнорируем системные типы записей Divi 5 / Theme Builder
+        $divi_types = [
+            'et_pb_layout',
+            'et_header_layout',
+            'et_body_layout',
+            'et_footer_layout',
+            'et_theme_builder',
+        ];
+        if ( ! empty( $query_vars['post_type'] ) ) {
+            $req_types = (array) $query_vars['post_type'];
+            if ( ! empty( array_intersect( $req_types, $divi_types ) ) ) {
+                return $query_vars;
+            }
+        }
+
+        // Определяем язык строго по префиксу REQUEST_URI (или язык по умолчанию)
+        $lang = self::detect_request_language();
         if ( ! $lang ) {
             return $query_vars;
         }
 
-        // Случай 1: Запрос страницы по pagename
+        // 1. Обработка $query_vars['pagename']
         if ( ! empty( $query_vars['pagename'] ) && is_string( $query_vars['pagename'] ) ) {
-            $path = $query_vars['pagename'];
-            $post_type = ! empty( $query_vars['post_type'] ) ? $query_vars['post_type'] : 'page';
-            $resolved_id = self::resolve_post_by_path_and_lang( $path, $lang, $post_type );
+            $path = trim( $query_vars['pagename'], '/' );
+            if ( '' === $path || $path === $lang ) {
+                return $query_vars;
+            }
 
-            if ( null === $resolved_id && 'page' === $post_type ) {
-                // Фоллбэк: возможно, это одиночный пост или CPT, когда структура пермалинков /%postname%/
-                $resolved_post_id = self::resolve_post_by_path_and_lang( $path, $lang, 'post' );
-                if ( null !== $resolved_post_id ) {
-                    unset( $query_vars['pagename'], $query_vars['page_id'] );
-                    $query_vars['p']    = $resolved_post_id;
-                    $query_vars['name'] = $path;
-                    $query_vars['lang'] = $lang;
+            $req_post_type = ! empty( $query_vars['post_type'] ) ? $query_vars['post_type'] : 'page';
+            $post_id       = self::resolve_post_by_path_and_lang( $path, $lang, $req_post_type );
+
+            if ( null === $post_id && str_starts_with( $path, $lang . '/' ) ) {
+                $stripped = substr( $path, strlen( $lang ) + 1 );
+                if ( '' !== $stripped ) {
+                    $post_id = self::resolve_post_by_path_and_lang( $stripped, $lang, $req_post_type );
+                }
+            }
+
+            if ( null !== $post_id ) {
+                $actual_type = get_post_type( $post_id );
+                if ( 'page' === $actual_type ) {
+                    $query_vars['page_id'] = $post_id;
+                } else {
+                    $query_vars['p'] = $post_id;
+                }
+                unset( $query_vars['pagename'], $query_vars['name'] );
+                return $query_vars;
+            }
+
+            // Фоллбэк: при пермалинках /%postname%/ WP может поместить слаг записи в pagename
+            if ( 'page' === $req_post_type ) {
+                $post_id = self::resolve_post_by_path_and_lang( $path, $lang, 'post' );
+                if ( null !== $post_id ) {
+                    $query_vars['p'] = $post_id;
+                    unset( $query_vars['pagename'], $query_vars['name'] );
                     return $query_vars;
                 }
             }
 
-            if ( null !== $resolved_id ) {
-                $resolved_type = get_post_type( $resolved_id );
-                if ( 'page' === $resolved_type ) {
-                    $query_vars['page_id'] = $resolved_id;
-                } else {
-                    $query_vars['p'] = $resolved_id;
-                }
-                $query_vars['lang'] = $lang;
-            }
             return $query_vars;
         }
 
-        // Случай 2: Запрос одиночной записи или CPT по name
+        // 2. Обработка $query_vars['name'] для одиночных записей и CPT
         if ( ! empty( $query_vars['name'] ) && is_string( $query_vars['name'] ) && empty( $query_vars['p'] ) && empty( $query_vars['page_id'] ) ) {
-            $slug = $query_vars['name'];
-            $post_type = ! empty( $query_vars['post_type'] ) ? $query_vars['post_type'] : [ 'post', 'page' ];
+            $slug = trim( $query_vars['name'], '/' );
+            if ( '' === $slug || $slug === $lang ) {
+                return $query_vars;
+            }
 
-            $resolved_id = self::resolve_post_by_path_and_lang( $slug, $lang, $post_type );
-            if ( null !== $resolved_id ) {
-                $actual_type = get_post_type( $resolved_id );
+            $req_post_type = ! empty( $query_vars['post_type'] ) ? $query_vars['post_type'] : [ 'post', 'page' ];
+            $post_id       = self::resolve_post_by_path_and_lang( $slug, $lang, $req_post_type );
+
+            if ( null !== $post_id ) {
+                $actual_type = get_post_type( $post_id );
                 if ( 'page' === $actual_type ) {
-                    unset( $query_vars['name'] );
-                    $query_vars['pagename'] = $slug;
-                    $query_vars['page_id']  = $resolved_id;
+                    $query_vars['page_id'] = $post_id;
                 } else {
-                    $query_vars['p'] = $resolved_id;
-                    if ( empty( $query_vars['post_type'] ) && $actual_type ) {
+                    $query_vars['p'] = $post_id;
+                    if ( empty( $query_vars['post_type'] ) && $actual_type && 'post' !== $actual_type ) {
                         $query_vars['post_type'] = $actual_type;
                     }
                 }
-                $query_vars['lang'] = $lang;
+                unset( $query_vars['pagename'], $query_vars['name'] );
             }
         }
 
         return $query_vars;
-    }
-
-    /**
-     * Хук parse_query (приоритет 1): исправление page_id и queried_object,
-     * если WP_Query::parse_query() через get_page_by_path() подставил страницу чужого языка.
-     *
-     * @param \WP_Query $query Объект запроса.
-     */
-    public static function fix_parsed_query( \WP_Query $query ): void {
-        if ( is_admin() || ! $query->is_main_query() ) {
-            return;
-        }
-
-        $lang = self::detect_request_language( $query->query_vars );
-        if ( ! $lang ) {
-            return;
-        }
-
-        $pagename = $query->get( 'pagename' );
-        $name     = $query->get( 'name' );
-        $page_id  = (int) $query->get( 'page_id' );
-        $post_id  = (int) $query->get( 'p' );
-
-        // Проверяем, не выбрана ли страница чужого языка
-        $current_target_id = $page_id > 0 ? $page_id : $post_id;
-        if ( $current_target_id > 0 && function_exists( 'pll_get_post_language' ) ) {
-            $item_lang = pll_get_post_language( $current_target_id, 'slug' );
-            if ( is_string( $item_lang ) && '' !== $item_lang && $item_lang !== $lang ) {
-                // Попытка 1: через связанный перевод Polylang (если у перевода тот же слаг)
-                if ( function_exists( 'pll_get_post' ) ) {
-                    $translated_id = (int) pll_get_post( $current_target_id, $lang );
-                    if ( $translated_id > 0 && get_post_field( 'post_name', $translated_id ) === get_post_field( 'post_name', $current_target_id ) ) {
-                        self::apply_resolved_post_to_query( $query, $translated_id );
-                        return;
-                    }
-                }
-
-                // Попытка 2: поиск по пути и языку
-                $lookup_path = is_string( $pagename ) && '' !== $pagename ? $pagename : ( is_string( $name ) ? $name : '' );
-                if ( '' === $lookup_path ) {
-                    $lookup_path = get_page_uri( $current_target_id ) ?: (string) get_post_field( 'post_name', $current_target_id );
-                }
-
-                if ( '' !== $lookup_path ) {
-                    $post_type   = $query->get( 'post_type' ) ?: get_post_type( $current_target_id ) ?: 'page';
-                    $resolved_id = self::resolve_post_by_path_and_lang( $lookup_path, $lang, $post_type );
-                    if ( null !== $resolved_id ) {
-                        self::apply_resolved_post_to_query( $query, $resolved_id );
-                        return;
-                    }
-                }
-            }
-        }
-
-        // Если pagename задан, но page_id еще не установлен или queried_object указывает на чужой язык
-        if ( is_string( $pagename ) && '' !== $pagename && 0 === $current_target_id ) {
-            $post_type   = $query->get( 'post_type' ) ?: 'page';
-            $resolved_id = self::resolve_post_by_path_and_lang( $pagename, $lang, $post_type );
-            if ( null !== $resolved_id ) {
-                self::apply_resolved_post_to_query( $query, $resolved_id );
-            }
-        }
-    }
-
-    /**
-     * Применение найденного ID записи к объекту WP_Query и сброс неверного queried_object.
-     *
-     * @param \WP_Query $query   Объект запроса.
-     * @param int       $post_id Правильный ID записи.
-     */
-    private static function apply_resolved_post_to_query( \WP_Query $query, int $post_id ): void {
-        $post_obj = get_post( $post_id );
-        if ( ! $post_obj instanceof \WP_Post ) {
-            return;
-        }
-
-        if ( 'page' === $post_obj->post_type ) {
-            $query->set( 'page_id', $post_id );
-            $query->set( 'p', 0 );
-            $query->is_page     = true;
-            $query->is_singular = true;
-            $query->is_single   = false;
-        } else {
-            $query->set( 'p', $post_id );
-            $query->set( 'page_id', 0 );
-            $query->is_single   = true;
-            $query->is_singular = true;
-            $query->is_page     = false;
-        }
-
-        $query->queried_object    = $post_obj;
-        $query->queried_object_id = $post_id;
-    }
-
-    /**
-     * Страховка SQL JOIN для запросов по name/pagename, если Polylang еще не добавил фильтр по языку.
-     *
-     * @param string    $join  Часть SQL JOIN.
-     * @param \WP_Query $query Объект запроса.
-     * @return string
-     */
-    public static function filter_posts_join( string $join, \WP_Query $query ): string {
-        if ( ! self::should_filter_sql_by_lang( $query, $join ) ) {
-            return $join;
-        }
-
-        global $wpdb;
-        $join .= " INNER JOIN {$wpdb->term_relationships} AS plu_tr ON ({$wpdb->posts}.ID = plu_tr.object_id) ";
-        return $join;
-    }
-
-    /**
-     * Страховка SQL WHERE для запросов по name/pagename.
-     *
-     * @param string    $where Часть SQL WHERE.
-     * @param \WP_Query $query Объект запроса.
-     * @return string
-     */
-    public static function filter_posts_where( string $where, \WP_Query $query ): string {
-        if ( false === strpos( $where, 'plu_tr.term_taxonomy_id' ) ) {
-            $lang = self::get_sql_guard_lang( $query );
-            if ( null !== $lang && false !== strpos( self::$last_join_snapshot, 'plu_tr' ) ) {
-                $tt_id = self::get_language_term_taxonomy_id( $lang );
-                if ( $tt_id ) {
-                    global $wpdb;
-                    $where .= $wpdb->prepare( ' AND plu_tr.term_taxonomy_id = %d ', $tt_id );
-                }
-            }
-        }
-        self::$last_join_snapshot = '';
-        return $where;
-    }
-
-    /**
-     * Временный снимок JOIN для синхронизации между posts_join и posts_where.
-     */
-    private static string $last_join_snapshot = '';
-
-    /**
-     * Проверка необходимости подключения SQL-страховки языка.
-     *
-     * @param \WP_Query $query Объект запроса.
-     * @param string    $join  Текущая строка JOIN.
-     * @return bool
-     */
-    private static function should_filter_sql_by_lang( \WP_Query $query, string $join ): bool {
-        self::$last_join_snapshot = '';
-
-        if ( is_admin() ) {
-            return false;
-        }
-
-        $name     = $query->get( 'name' );
-        $pagename = $query->get( 'pagename' );
-
-        if ( empty( $name ) && empty( $pagename ) ) {
-            return false;
-        }
-
-        // Если уже есть фильтр по term_relationships от Polylang или нашего модуля — не дублируем
-        global $wpdb;
-        if ( false !== strpos( $join, $wpdb->term_relationships ) ) {
-            return false;
-        }
-
-        $post_type = $query->get( 'post_type' ) ?: 'post';
-        if ( is_string( $post_type ) && function_exists( 'pll_is_translated_post_type' ) && ! pll_is_translated_post_type( $post_type ) ) {
-            return false;
-        }
-
-        $lang = self::get_sql_guard_lang( $query );
-        if ( ! $lang || ! self::get_language_term_taxonomy_id( $lang ) ) {
-            return false;
-        }
-
-        self::$last_join_snapshot = 'plu_tr';
-        return true;
-    }
-
-    /**
-     * Получение языка для SQL-страховки.
-     *
-     * @param \WP_Query $query Объект запроса.
-     * @return string|null
-     */
-    private static function get_sql_guard_lang( \WP_Query $query ): ?string {
-        $q_lang = $query->get( 'lang' );
-        if ( is_string( $q_lang ) && '' !== $q_lang ) {
-            return sanitize_key( $q_lang );
-        }
-        return self::detect_request_language( $query->query_vars );
     }
 
     /**
@@ -712,7 +547,7 @@ final class SameSlug {
             return $post_id;
         }
 
-        // Получаем URL из стека вызовов url_to_postid, если возможно, или проверяем связанный перевод
+        // Получаем URL из стека вызовов url_to_postid
         $target_url = null;
         // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_debug_backtrace
         $trace = debug_backtrace( DEBUG_BACKTRACE_PROVIDE_OBJECT, 5 );
@@ -733,7 +568,7 @@ final class SameSlug {
             return $post_id;
         }
 
-        // 1. Если записи связаны как переводы в Polylang и имеют одинаковый слаг
+        // 1. Если записи связаны как переводы в Polylang
         if ( function_exists( 'pll_get_post' ) ) {
             $translated_id = (int) pll_get_post( $post_id, $lang );
             if ( $translated_id > 0 ) {
@@ -777,7 +612,6 @@ final class SameSlug {
         $expected_lang = isset( $language->slug ) ? (string) $language->slug : '';
 
         if ( '' !== $expected_lang && $post_lang === $expected_lang ) {
-            // Проверяем, не ведет ли $redirect_url на другой язык или другой слаг из-за путаницы слагов
             $req_uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_parse_url( (string) $_SERVER['REQUEST_URI'], PHP_URL_PATH ) : '';
             $red_uri = (string) wp_parse_url( $redirect_url, PHP_URL_PATH );
 
@@ -785,7 +619,6 @@ final class SameSlug {
                 return false;
             }
 
-            // Если язык записи совпадает с языком в URL, запрещаем редирект на URL без языкового префикса (или с чужим префиксом)
             $url_lang = self::detect_request_language();
             if ( $url_lang === $post_lang ) {
                 $redirect_lang = self::detect_request_language( [], $redirect_url );

@@ -55,7 +55,7 @@ final class Settings {
     public static function add_action_links( array $links ): array {
         $settings_link = sprintf(
             '<a href="%s">%s</a>',
-            esc_url( admin_url( 'options-general.php?page=' . self::PAGE_SLUG ) ),
+            esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG ) ),
             esc_html__( 'Настройки', 'polyland-up' )
         );
         array_unshift( $links, $settings_link );
@@ -63,43 +63,27 @@ final class Settings {
     }
 
     /**
-     * Добавление страниц настроек в админ-меню WordPress.
-     * Пункт «Языки -> AI & Same Slug» (при наличии Polylang) и «Настройки -> Polylang AI Pro».
+     * Регистрация отдельного пункта меню верхнего уровня в админ-панели WordPress.
      */
     public static function register_menu(): void {
-        $is_polylang_active = function_exists( 'pll_current_language' ) || defined( 'POLYLANG_VERSION' );
-
-        // Добавляем в подменю Polylang, если активен
-        if ( $is_polylang_active ) {
-            add_submenu_page(
-                'mlang',
-                __( 'AI & Same Slug', 'polyland-up' ),
-                __( 'AI & Same Slug', 'polyland-up' ),
-                'manage_options',
-                self::PAGE_SLUG,
-                [ self::class, 'render_page' ]
-            );
-        }
-
-        // Фоллбэк/дублирование в меню «Настройки» для гарантированного доступа
-        add_options_page(
-            __( 'Polylang AI Pro', 'polyland-up' ),
-            __( 'Polylang AI Pro', 'polyland-up' ),
+        add_menu_page(
+            __( 'Polylang Divi 5 AI Auto-Translator & Same Slug', 'polyland-up' ),
+            __( 'Polylang AI', 'polyland-up' ),
             'manage_options',
             self::PAGE_SLUG,
-            [ self::class, 'render_page' ]
+            [ self::class, 'render_page' ],
+            'dashicons-translation',
+            81
         );
     }
 
     /**
-     * Подключение CSS и JS только на странице настроек плагина.
+     * Подключение CSS и JS только на странице настроек плагина (toplevel_page_polylang-up).
      *
-     * @param string $hook Идентификатор текущего экрана.
+     * @param string $hook_suffix Идентификатор текущего экрана.
      */
-    public static function enqueue_assets( string $hook ): void {
-        $is_settings_page = isset( $_GET['page'] ) && self::PAGE_SLUG === $_GET['page'];
-
-        if ( ! $is_settings_page ) {
+    public static function enqueue_assets( string $hook_suffix ): void {
+        if ( 'toplevel_page_' . self::PAGE_SLUG !== $hook_suffix ) {
             return;
         }
 
@@ -436,59 +420,179 @@ final class Settings {
     }
 
     /**
-     * Тестирование Google Translate GTX.
+     * Каскадный перевод текста через бесплатные каналы (clients5 -> gtx -> mymemory)
+     * с реалистичным браузерным User-Agent для обхода HTTP 429 на shared-хостингах.
+     *
+     * @param string $text Исходный текст.
+     * @param string $sl   Исходный язык (по умолчанию 'en').
+     * @param string $tl   Целевой язык (по умолчанию 'ru').
+     * @return array{success: bool, channel: string, channel_label: string, translated: string, time_ms: int, errors: array<string>}
+     */
+    public static function translate_free_cascade( string $text, string $sl = 'en', string $tl = 'ru' ): array {
+        $browser_ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+        $request_args = [
+            'timeout'    => 10,
+            'user-agent' => $browser_ua,
+            'headers'    => [
+                'Accept'          => 'application/json, text/plain, */*',
+                'Accept-Language' => 'en-US,en;q=0.9,ru;q=0.8',
+            ],
+        ];
+
+        $encoded_text = urlencode( $text );
+
+        $channels = [
+            'clients5' => [
+                'label' => 'Google GTX / clients5',
+                'url'   => "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl={$sl}&tl={$tl}&q={$encoded_text}",
+            ],
+            'gtx' => [
+                'label' => 'Google GTX / gtx',
+                'url'   => "https://translate.googleapis.com/translate_a/single?client=gtx&sl={$sl}&tl={$tl}&dt=t&q={$encoded_text}",
+            ],
+            'mymemory' => [
+                'label' => 'MyMemory API (Fallback)',
+                'url'   => "https://api.mymemory.translated.net/get?q={$encoded_text}&langpair={$sl}|{$tl}",
+            ],
+        ];
+
+        $errors = [];
+
+        foreach ( $channels as $channel_key => $channel_cfg ) {
+            $start    = microtime( true );
+            $response = wp_remote_get( $channel_cfg['url'], $request_args );
+            $elapsed  = (int) round( ( microtime( true ) - $start ) * 1000 );
+
+            if ( is_wp_error( $response ) ) {
+                $errors[] = $channel_key . ': ' . $response->get_error_message();
+                continue;
+            }
+
+            $code = (int) wp_remote_retrieve_response_code( $response );
+            if ( 200 !== $code ) {
+                $errors[] = $channel_key . ': HTTP ' . $code;
+                continue;
+            }
+
+            $body = (string) wp_remote_retrieve_body( $response );
+            $data = json_decode( $body, true );
+
+            if ( ! is_array( $data ) ) {
+                $errors[] = $channel_key . ': некорректный JSON';
+                continue;
+            }
+
+            $translated = self::extract_free_channel_translation( $channel_key, $data );
+            if ( '' !== $translated ) {
+                return [
+                    'success'       => true,
+                    'channel'       => $channel_key,
+                    'channel_label' => $channel_cfg['label'],
+                    'translated'    => $translated,
+                    'time_ms'       => $elapsed,
+                    'errors'        => $errors,
+                ];
+            }
+
+            $errors[] = $channel_key . ': пустой ответ или лимит';
+        }
+
+        return [
+            'success'       => false,
+            'channel'       => '',
+            'channel_label' => '',
+            'translated'    => '',
+            'time_ms'       => 0,
+            'errors'        => $errors,
+        ];
+    }
+
+    /**
+     * Извлечение переведенной строки из JSON-ответа конкретного канала.
+     *
+     * @param string               $channel_key Ключ канала ('clients5', 'gtx', 'mymemory').
+     * @param array<mixed, mixed>  $data        Декодированный JSON.
+     * @return string
+     */
+    private static function extract_free_channel_translation( string $channel_key, array $data ): string {
+        if ( 'clients5' === $channel_key ) {
+            // Формат [["Перевод"]] или [["Перевод", "en"]]
+            if ( isset( $data[0] ) && is_array( $data[0] ) && isset( $data[0][0] ) && is_string( $data[0][0] ) ) {
+                return trim( $data[0][0] );
+            }
+            // Формат ["Перевод"]
+            if ( isset( $data[0] ) && is_string( $data[0] ) ) {
+                return trim( $data[0] );
+            }
+            // Альтернативный формат {"sentences":[{"trans":"..."}]}
+            if ( isset( $data['sentences'] ) && is_array( $data['sentences'] ) ) {
+                $parts = [];
+                foreach ( $data['sentences'] as $sentence ) {
+                    if ( is_array( $sentence ) && isset( $sentence['trans'] ) && is_string( $sentence['trans'] ) ) {
+                        $parts[] = $sentence['trans'];
+                    }
+                }
+                return trim( implode( '', $parts ) );
+            }
+            return '';
+        }
+
+        if ( 'gtx' === $channel_key ) {
+            if ( isset( $data[0] ) && is_array( $data[0] ) ) {
+                $parts = [];
+                foreach ( $data[0] as $segment ) {
+                    if ( is_array( $segment ) && isset( $segment[0] ) && is_string( $segment[0] ) ) {
+                        $parts[] = $segment[0];
+                    }
+                }
+                return trim( implode( '', $parts ) );
+            }
+            return '';
+        }
+
+        if ( 'mymemory' === $channel_key ) {
+            $status = isset( $data['responseStatus'] ) ? (int) $data['responseStatus'] : 200;
+            if ( 200 !== $status ) {
+                return '';
+            }
+            if ( isset( $data['responseData']['translatedText'] ) && is_string( $data['responseData']['translatedText'] ) ) {
+                $text = trim( $data['responseData']['translatedText'] );
+                if ( '' !== $text && ! str_contains( $text, 'MYMEMORY WARNING' ) ) {
+                    return $text;
+                }
+            }
+            return '';
+        }
+
+        return '';
+    }
+
+    /**
+     * Тестирование бесплатного переводчика (каскад clients5 -> gtx -> mymemory).
      */
     private static function test_gtx_api(): void {
-        $test_phrase = 'Connection successful';
-        $url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=' . rawurlencode( $test_phrase );
+        $result = self::translate_free_cascade( 'Connection successful', 'en', 'ru' );
 
-        $start = microtime( true );
-        $response = wp_remote_get( $url, [
-            'timeout'    => 10,
-            'user-agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        ] );
-        $elapsed = (int) round( ( microtime( true ) - $start ) * 1000 );
-
-        if ( is_wp_error( $response ) ) {
-            wp_send_json_error( [
-                'message' => sprintf(
-                    esc_html__( 'Сетевая ошибка при запросе к Google GTX: %s', 'polyland-up' ),
-                    $response->get_error_message()
+        if ( $result['success'] ) {
+            wp_send_json_success( [
+                'engine'     => $result['channel_label'],
+                'channel'    => $result['channel'],
+                'translated' => $result['translated'],
+                'time_ms'    => $result['time_ms'],
+                'message'    => sprintf(
+                    esc_html__( 'Соединение успешно (%1$s, %2$d мс): «%3$s»', 'polyland-up' ),
+                    esc_html( $result['channel_label'] ),
+                    $result['time_ms'],
+                    esc_html( $result['translated'] )
                 ),
-                'time_ms' => $elapsed,
             ] );
         }
 
-        $code = (int) wp_remote_retrieve_response_code( $response );
-        if ( 200 !== $code ) {
-            wp_send_json_error( [
-                'message' => sprintf(
-                    esc_html__( 'Google Translate GTX вернул HTTP статус %d.', 'polyland-up' ),
-                    $code
-                ),
-                'time_ms' => $elapsed,
-            ] );
-        }
-
-        $body = wp_remote_retrieve_body( $response );
-        $data = json_decode( $body, true );
-
-        $translated = '';
-        if ( is_array( $data ) && isset( $data[0][0][0] ) && is_string( $data[0][0][0] ) ) {
-            $translated = $data[0][0][0];
-        }
-
-        if ( '' === $translated ) {
-            $translated = 'Успешное подключение';
-        }
-
-        wp_send_json_success( [
-            'engine'     => 'Google Translate (Free GTX)',
-            'translated' => $translated,
-            'time_ms'    => $elapsed,
-            'message'    => sprintf(
-                esc_html__( 'Соединение успешно установлено! Ответ получен за %d мс.', 'polyland-up' ),
-                $elapsed
+        $errors_summary = ! empty( $result['errors'] ) ? implode( '; ', $result['errors'] ) : __( 'Все узлы недоступны', 'polyland-up' );
+        wp_send_json_error( [
+            'message' => sprintf(
+                esc_html__( 'Не удалось подключиться ни к одному бесплатному каналу (%s).', 'polyland-up' ),
+                esc_html( $errors_summary )
             ),
         ] );
     }
@@ -637,6 +741,7 @@ final class Settings {
         ?>
         <div class="wrap plu-settings-wrap">
             <h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
+            <?php settings_errors(); ?>
 
             <!-- Статус-бар окружения -->
             <div class="plu-status-bar">
@@ -679,7 +784,7 @@ final class Settings {
             <nav class="nav-tab-wrapper wp-clearfix">
                 <?php foreach ( $tabs as $tab_key => $tab_title ) : ?>
                     <a
-                        href="<?php echo esc_url( add_query_arg( [ 'page' => self::PAGE_SLUG, 'tab' => $tab_key ], admin_url( 'options-general.php' ) ) ); ?>"
+                        href="<?php echo esc_url( add_query_arg( [ 'page' => self::PAGE_SLUG, 'tab' => $tab_key ], admin_url( 'admin.php' ) ) ); ?>"
                         class="nav-tab <?php echo ( $active_tab === $tab_key ) ? 'nav-tab-active' : ''; ?>"
                     >
                         <?php echo esc_html( $tab_title ); ?>

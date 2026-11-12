@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `1.2`
+- **Текущая версия:** `1.3`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -28,7 +28,7 @@ Polyland-Up/
 └── includes/
     ├── Core/
     │   ├── Init.php          # Первичная инициализация компонентов ядра
-    │   ├── Settings.php      # Settings API, экран настроек, AJAX-тест API
+    │   ├── Settings.php      # Settings API, меню «Polylang AI», AJAX-тест API
     │   └── Updater.php       # Автономный механизм обновлений с GitHub piratexnik/Polyland-Up
     └── Modules/
         ├── SameSlug.php      # Модуль одинаковых URL-слагов между языками (Этап 2)
@@ -39,7 +39,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '1.2'
+- `PLU_VERSION` — '1.3'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -88,9 +88,13 @@ plu_get_option( string $key, mixed $default = '' ): mixed
 
 ---
 
-## 5. Тестирование API перевода (AJAX)
-На странице настроек плагина доступна кнопка **«🔌 Проверить соединение с API»**, отправляющая AJAX-запрос `wp_ajax_plu_test_api` с проверкой прав `manage_options` и Nonce:
-- **Для GTX:** проверяется ответ эндпоинта Google Translate с тестовой фразой `"Connection successful"`, измеряется задержка ответа в миллисекундах.
+## 5. Тестирование API перевода (AJAX) и каскад GTX
+На странице настроек (пункт главного меню **«Polylang AI»**, `admin.php?page=polylang-up`, позиция 81) доступна кнопка **«🔌 Проверить соединение с API»**, отправляющая AJAX-запрос `wp_ajax_plu_test_api` с проверкой прав `manage_options` и Nonce:
+- **Для GTX (каскад из 3 бесплатных каналов с браузерным User-Agent):**
+  1. `clients5.google.com/translate_a/t?client=dict-chrome-ex` (Google GTX / clients5).
+  2. `translate.googleapis.com/translate_a/single?client=gtx` (Google GTX / gtx).
+  3. `api.mymemory.translated.net/get` (MyMemory API Fallback).
+  При HTTP 429 или ошибке канала система автоматически переключается на следующий узел и выводит канал, через который прошел ответ, и задержку в миллисекундах.
 - **Для Gemini API:** отправляется запрос `models/{model}:generateContent` с минимальным JSON-payload. При успехе возвращается перевод и время отклика модели, при ошибке (400, 403, 404, 429) парсится `error.message` Google API и выводится понятная причина на русском языке.
 - Проверка работает по текущим значениям полей на форме даже до сохранения настроек в базу данных.
 
@@ -106,8 +110,9 @@ plu_get_option( string $key, mixed $default = '' ): mixed
 2. **Генерация уникального слага (`wp_unique_post_slug`):**
    - Проверяет занятость `post_name` только среди записей с тем же `term_taxonomy_id` языка в таблице `wp_term_relationships`.
    - Сохраняет чистый `$original_slug` для переводов на других языках без суффикса `-2`.
-3. **Разрешение URL на фронтенде (`resolve_post_by_path_and_lang`):**
-   - Обходит ограничение ядра `get_page_by_path()`, пошагово разрешая сегменты иерархического пути (`about`, `catalog/trays`) строго в рамках текущего языка.
-   - Интегрируется в хуки `request`, `parse_query` (приоритет 1), `posts_join` / `posts_where` и `url_to_postid`.
+3. **Разрешение URL на фронтенде (`filter_request` и `resolve_post_by_path_and_lang`):**
+   - Работает исключительно на хуке `request` главного запроса браузера, не затрагивая внутренние `WP_Query` шаблонов Divi 5 Theme Builder (`et_header_layout`, `et_body_layout`, `et_footer_layout`, `et_pb_layout`, `et_theme_builder`).
+   - Определяет язык строго по первому сегменту `$_SERVER['REQUEST_URI']` (или `pll_default_language`), разрешает иерархический путь и заменяет `pagename`/`name` на точный `page_id` / `p` (с очисткой `pagename` и `name`).
+   - Дополнительно корректирует `url_to_postid`.
 4. **Защита от ложных редиректов:**
    - Фильтры `pll_check_canonical_url` и `redirect_canonical` блокируют сброс языкового префикса или редирект на чужой язык при открытии корректно локализованной страницы.
