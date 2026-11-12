@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace PolylangUp\Core;
 
+use PolylangUp\Modules\MetaboxUI;
 use PolylangUp\Modules\SameSlug;
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -25,6 +26,7 @@ final class Init {
         if ( $is_admin || $is_cron || $is_cli ) {
             Settings::init();
             Updater::init();
+            MetaboxUI::init();
         }
 
         // Модуль одинаковых слагов работает как в админке, так и на фронтенде

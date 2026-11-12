@@ -116,3 +116,223 @@
     font-size: 12px;
     line-height: 1.5;
 }
+
+/* ========================================================
+ * Metabox UI (AI Duplicator & Translator)
+ * ======================================================== */
+.plu-metabox-wrap {
+    font-size: 13px;
+    color: #2c3338;
+}
+
+.plu-metabox-notice {
+    padding: 8px 10px;
+    background: #fcf9e8;
+    border-left: 3px solid #dba617;
+    color: #7c5400;
+    font-size: 12px;
+    border-radius: 2px;
+}
+
+.plu-metabox-notice p {
+    margin: 0;
+}
+
+.plu-source-lang-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+    margin-bottom: 12px;
+    background: #f0f6fc;
+    border: 1px solid #c5d9ed;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.plu-lang-pill {
+    font-weight: 600;
+    color: #135e96;
+}
+
+.plu-metabox-section {
+    margin-bottom: 12px;
+}
+
+.plu-section-label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: #1d2327;
+}
+
+.plu-target-langs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.plu-lang-row {
+    padding: 7px 9px;
+    background: #f9f9f9;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    transition: border-color 0.15s ease;
+}
+
+.plu-lang-row.is-missing {
+    background: #ffffff;
+}
+
+.plu-lang-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    margin-bottom: 4px;
+}
+
+.plu-lang-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.plu-lang-flag img {
+    vertical-align: middle;
+}
+
+.plu-lang-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding-left: 22px;
+}
+
+.plu-lang-quick-links {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.plu-lang-quick-links a {
+    text-decoration: none;
+    color: #2271b1;
+    line-height: 1;
+}
+
+.plu-lang-quick-links a:hover {
+    color: #135e96;
+}
+
+.plu-lang-quick-links .dashicons {
+    font-size: 15px;
+    width: 15px;
+    height: 15px;
+}
+
+.plu-overwrite-box {
+    padding: 8px 10px;
+    background: #fcf9e8;
+    border: 1px solid #f0c33c;
+    border-radius: 4px;
+}
+
+.plu-options-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    background: #f6f7f7;
+    border: 1px solid #e2e4e7;
+    border-radius: 4px;
+}
+
+.plu-option-checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 1.4;
+    cursor: pointer;
+}
+
+.plu-option-checkbox input[type="checkbox"] {
+    margin-top: 2px;
+}
+
+.plu-option-checkbox code {
+    font-size: 11px;
+    padding: 1px 4px;
+}
+
+.plu-metabox-actions {
+    margin-top: 14px;
+    text-align: center;
+}
+
+.plu-duplicator-log {
+    margin-top: 12px;
+    padding: 8px;
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    font-size: 12px;
+    max-height: 360px;
+    overflow-y: auto;
+}
+
+.plu-log-item {
+    padding: 7px 8px;
+    margin-bottom: 6px;
+    background: #ffffff;
+    border-left: 3px solid #72aee6;
+    border-radius: 2px;
+    line-height: 1.4;
+}
+
+.plu-log-item:last-child {
+    margin-bottom: 0;
+}
+
+.plu-log-item.is-success {
+    border-left-color: #00a32a;
+    background: #f0f9eb;
+}
+
+.plu-log-item.is-error {
+    border-left-color: #d63638;
+    background: #fef0f0;
+    color: #8a1f1f;
+}
+
+.plu-log-item.is-warning {
+    border-left-color: #dba617;
+    background: #fcf9e8;
+    color: #7c5400;
+}
+
+.plu-log-note {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #50575e;
+}
+
+.plu-log-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 6px;
+}
+
+.plu-log-links .button-small {
+    font-size: 11px;
+    line-height: 20px;
+    min-height: 22px;
+    padding: 0 7px;
+}
+

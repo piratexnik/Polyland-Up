@@ -78,13 +78,31 @@ final class Settings {
     }
 
     /**
-     * Подключение CSS и JS только на странице настроек плагина (toplevel_page_polylang-up).
+     * Подключение CSS и JS только на странице настроек плагина и на экранах редактирования переводимых записей.
      *
      * @param string $hook_suffix Идентификатор текущего экрана.
      */
     public static function enqueue_assets( string $hook_suffix ): void {
-        if ( 'toplevel_page_' . self::PAGE_SLUG !== $hook_suffix ) {
+        $is_settings_screen = ( 'toplevel_page_' . self::PAGE_SLUG === $hook_suffix );
+        $is_post_screen     = in_array( $hook_suffix, [ 'post.php', 'post-new.php' ], true );
+
+        if ( ! $is_settings_screen && ! $is_post_screen ) {
             return;
+        }
+
+        if ( $is_post_screen ) {
+            if ( ! function_exists( 'pll_is_translated_post_type' ) ) {
+                return;
+            }
+            $screen = get_current_screen();
+            if (
+                ! $screen ||
+                empty( $screen->post_type ) ||
+                in_array( $screen->post_type, [ 'attachment', 'revision', 'nav_menu_item' ], true ) ||
+                ! pll_is_translated_post_type( $screen->post_type )
+            ) {
+                return;
+            }
         }
 
         wp_enqueue_style(
@@ -106,8 +124,21 @@ final class Settings {
             'plu-admin-js',
             'pluAdminData',
             [
-                'ajax_url' => admin_url( 'admin-ajax.php' ),
-                'nonce'    => wp_create_nonce( 'plu_admin_nonce' ),
+                'ajax_url'    => admin_url( 'admin-ajax.php' ),
+                'nonce'       => wp_create_nonce( 'plu_admin_nonce' ),
+                'clone_nonce' => wp_create_nonce( 'plu_clone_nonce' ),
+                'i18n'        => [
+                    'no_langs_selected'  => __( 'Выберите хотя бы один целевой язык.', 'polyland-up' ),
+                    'overwrite_required' => __( 'Вы выбрали язык(и), для которых перевод уже существует. Отметьте галочку перезаписи или снимите выделение.', 'polyland-up' ),
+                    'processing_lang'    => __( 'Обработка языка', 'polyland-up' ),
+                    'of'                 => __( 'из', 'polyland-up' ),
+                    'done_created'       => __( 'готов!', 'polyland-up' ),
+                    'done_updated'       => __( 'обновлён!', 'polyland-up' ),
+                    'btn_wp_edit'        => __( '✏️ Редактор WP', 'polyland-up' ),
+                    'btn_divi_builder'   => __( '🎨 Divi Builder', 'polyland-up' ),
+                    'btn_view_page'      => __( '👁 Открыть страницу', 'polyland-up' ),
+                    'finished_all'       => __( 'Обработка выбранных языков завершена.', 'polyland-up' ),
+                ],
             ]
         );
     }

@@ -116,3 +116,19 @@ plu_get_option( string $key, mixed $default = '' ): mixed
    - Дополнительно корректирует `url_to_postid`.
 4. **Защита от ложных редиректов:**
    - Фильтры `pll_check_canonical_url` и `redirect_canonical` блокируют сброс языкового префикса или редирект на чужой язык при открытии корректно локализованной страницы.
+
+---
+
+## 7. Метабокс редактора и клонирование (`MetaboxUI.php`)
+Регистрирует метабокс `plu_ai_duplicator_box` в правой колонке (`side`, `high`) для всех переводимых типов записей Polylang (`post`, `page`, CPT).
+1. **Интерфейс (`render_metabox`):**
+   - Отображает текущий язык записи и список всех целевых языков со статусом (`Нет перевода` / `Уже есть: #ID` + быстрые ссылки редактирования и просмотра).
+   - Поддерживает подтверждение перезаписи (`overwrite_existing`), выбор режима (`clone_only`, `translate_gtx`, `translate_gemini`), сохранение оригинального слага (`keep_same_slug`), перелинковку (`rewrite_links`) и статус новой записи (`draft`/`publish`).
+2. **Последовательный AJAX-конвейер (`wp_ajax_plu_duplicate_post`):**
+   - Клиент (`admin.js`) отправляет запросы по одному языку за раз, отображая живой прогресс и итоговые кнопки («✏️ Редактор WP», «🎨 Divi Builder», «👁 Открыть страницу»).
+   - Определяет переведенного родителя (`post_parent`) и фиксирует `SameSlug::$forced_lang` на время вставки/обновления записи.
+   - Оборачивает `post_content` (а также `post_title`, `post_excerpt` и мета-значения) в `wp_slash()`, сохраняя JSON-экранирование блоков Divi 5.
+   - Привязывает язык и группу переводов Polylang (`pll_set_post_language`, `pll_save_post_translations`).
+   - Копирует мета-поля (Divi, Rank Math, `_thumbnail_id`, `_wp_page_template`), исключая `_edit_lock`, `_edit_last`, `_wp_old_slug`, `_wp_old_date` и кеш стилей Divi (`_et_pb_static_css_file`, `_et_core_cached_shortcodes`, `_et_dynamic_cached_shortcodes`, `_et_builder_module_features_cache`).
+   - Синхронизирует все таксономии с автоматической подстановкой переведенных термов (`pll_get_term`).
+   - Содержит точки расширения для конвейера Этапов 4–6 (`DiviParser`, `TranslatorAPI`, `LinkRewriter` и хуки `plu_before_insert_cloned_post` / `plu_after_copy_post_meta`).
