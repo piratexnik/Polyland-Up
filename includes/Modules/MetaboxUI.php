@@ -30,8 +30,9 @@ final class MetaboxUI {
      * @param string $post_type Тип текущей записи.
      * @param mixed  $post      Объект WP_Post.
      */
-    public static function register_metabox( string $post_type, mixed $post = null ): void {
-        if ( in_array( $post_type, [ 'attachment', 'revision', 'nav_menu_item' ], true ) ) {
+    public static function register_metabox( mixed $post_type, mixed $post = null ): void {
+        $post_type = (string) $post_type;
+        if ( '' === $post_type || in_array( $post_type, [ 'attachment', 'revision', 'nav_menu_item' ], true ) ) {
             return;
         }
 

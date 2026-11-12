@@ -25,6 +25,11 @@ final class SameSlug {
     private static array $lang_tt_cache = [];
 
     /**
+     * Флаг защиты от рекурсии в фильтре url_to_postid.
+     */
+    private static bool $in_url_to_postid = false;
+
+    /**
      * Инициализация хуков модуля.
      */
     public static function init(): void {
@@ -153,13 +158,20 @@ final class SameSlug {
      * @return string Уникальный слаг в рамках целевого языка.
      */
     public static function filter_unique_post_slug(
-        string $slug,
-        int $post_ID,
-        string $post_status,
-        string $post_type,
-        int $post_parent,
-        string $original_slug
-    ): string {
+        mixed $slug,
+        mixed $post_ID,
+        mixed $post_status,
+        mixed $post_type,
+        mixed $post_parent,
+        mixed $original_slug
+    ): mixed {
+        $slug          = (string) $slug;
+        $post_ID       = (int) $post_ID;
+        $post_status   = (string) $post_status;
+        $post_type     = (string) $post_type;
+        $post_parent   = (int) $post_parent;
+        $original_slug = (string) $original_slug;
+
         // Пропускаем системные статусы и типы
         if ( in_array( $post_status, [ 'inherit', 'auto-draft' ], true ) ) {
             return $slug;
@@ -433,8 +445,8 @@ final class SameSlug {
      * @param array<string, mixed> $query_vars Переменные запроса.
      * @return array<string, mixed>
      */
-    public static function filter_request( array $query_vars ): array {
-        if ( is_admin() ) {
+    public static function filter_request( mixed $query_vars ): mixed {
+        if ( ! is_array( $query_vars ) || is_admin() ) {
             return $query_vars;
         }
 
@@ -542,9 +554,12 @@ final class SameSlug {
      * @param int $post_id Найденный ядром WP post_id.
      * @return int Скорректированный post_id.
      */
-    public static function filter_url_to_postid( int $post_id ): int {
+    public static function filter_url_to_postid( mixed $post_id ): mixed {
+        $raw_post_id = $post_id;
+        $post_id     = (int) $post_id;
+
         if ( self::$in_url_to_postid || $post_id <= 0 || ! function_exists( 'pll_get_post_language' ) ) {
-            return $post_id;
+            return $raw_post_id;
         }
 
         self::$in_url_to_postid = true;
@@ -604,8 +619,8 @@ final class SameSlug {
      * @param object       $language     Объект языка Polylang ($language->slug).
      * @return string|false
      */
-    public static function filter_pll_canonical_url( string|false $redirect_url, object $language ): string|false {
-        if ( false === $redirect_url || ! is_singular() ) {
+    public static function filter_pll_canonical_url( mixed $redirect_url, mixed $language ): mixed {
+        if ( ! is_string( $redirect_url ) || '' === $redirect_url || ! is_singular() ) {
             return $redirect_url;
         }
 
@@ -615,7 +630,7 @@ final class SameSlug {
         }
 
         $post_lang     = pll_get_post_language( $queried_id, 'slug' );
-        $expected_lang = isset( $language->slug ) ? (string) $language->slug : '';
+        $expected_lang = ( is_object( $language ) && isset( $language->slug ) ) ? (string) $language->slug : '';
 
         if ( '' !== $expected_lang && $post_lang === $expected_lang ) {
             $req_uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_parse_url( (string) $_SERVER['REQUEST_URI'], PHP_URL_PATH ) : '';
@@ -640,12 +655,12 @@ final class SameSlug {
     /**
      * Защита от сброса языкового префикса в стандартном redirect_canonical WordPress.
      *
-     * @param string|false $redirect_url  Целевой URL редиректа.
-     * @param string       $requested_url Запрошенный URL.
-     * @return string|false
+     * @param mixed $redirect_url  Целевой URL редиректа.
+     * @param mixed $requested_url Запрошенный URL.
+     * @return mixed
      */
-    public static function filter_redirect_canonical( string|false $redirect_url, string $requested_url ): string|false {
-        if ( false === $redirect_url || ! is_singular() ) {
+    public static function filter_redirect_canonical( mixed $redirect_url, mixed $requested_url ): mixed {
+        if ( ! is_string( $redirect_url ) || '' === $redirect_url || ! is_string( $requested_url ) || ! is_singular() ) {
             return $redirect_url;
         }
 

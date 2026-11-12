@@ -141,7 +141,11 @@ final class Updater {
      * @param string               $url  Запрашиваемый URL.
      * @return array<string, mixed>
      */
-    public static function authorize_download_request( array $args, string $url ): array {
+    public static function authorize_download_request( mixed $args, mixed $url ): mixed {
+        if ( ! is_array( $args ) || ! is_string( $url ) ) {
+            return $args;
+        }
+
         $token = trim( (string) plu_get_option( 'github_token', '' ) );
         if ( '' === $token ) {
             if ( isset( $args['headers']['Authorization'] ) ) {
@@ -272,8 +276,12 @@ final class Updater {
      * @param array|null  $hook_extra    Дополнительные данные хука.
      * @return string Исправленный путь к папке плагина.
      */
-    public static function fix_source_directory( string $source, string $remote_source, mixed $upgrader, ?array $hook_extra = null ): string {
+    public static function fix_source_directory( mixed $source, mixed $remote_source, mixed $upgrader, mixed $hook_extra = null ): mixed {
         global $wp_filesystem;
+
+        if ( ! is_string( $source ) || ! is_string( $remote_source ) ) {
+            return $source;
+        }
 
         $is_our_plugin = false;
         if ( is_array( $hook_extra ) && isset( $hook_extra['plugin'] ) && $hook_extra['plugin'] === PLU_BASENAME ) {
@@ -312,8 +320,8 @@ final class Updater {
      * @param object $args   Аргументы запроса.
      * @return mixed
      */
-    public static function plugin_info( mixed $res, string $action, object $args ): mixed {
-        if ( 'plugin_information' !== $action || ! isset( $args->slug ) || self::PLUGIN_SLUG !== $args->slug ) {
+    public static function plugin_info( mixed $res, mixed $action, mixed $args ): mixed {
+        if ( 'plugin_information' !== $action || ! is_object( $args ) || ! isset( $args->slug ) || self::PLUGIN_SLUG !== $args->slug ) {
             return $res;
         }
 
@@ -347,7 +355,11 @@ final class Updater {
      * @param string        $file  Базовый путь к файлу плагина.
      * @return array<string>
      */
-    public static function add_row_meta( array $links, string $file ): array {
+    public static function add_row_meta( mixed $links, mixed $file ): mixed {
+        if ( ! is_array( $links ) || ! is_string( $file ) ) {
+            return $links;
+        }
+
         if ( PLU_BASENAME === $file ) {
             $check_url = wp_nonce_url(
                 admin_url( 'plugins.php?plu_action=force_check_update' ),

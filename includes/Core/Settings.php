@@ -52,7 +52,11 @@ final class Settings {
      * @param array<string> $links Ссылки действий плагина.
      * @return array<string>
      */
-    public static function add_action_links( array $links ): array {
+    public static function add_action_links( mixed $links ): mixed {
+        if ( ! is_array( $links ) ) {
+            return $links;
+        }
+
         $settings_link = sprintf(
             '<a href="%s">%s</a>',
             esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG ) ),
@@ -80,9 +84,10 @@ final class Settings {
     /**
      * Подключение CSS и JS только на странице настроек плагина и на экранах редактирования переводимых записей.
      *
-     * @param string $hook_suffix Идентификатор текущего экрана.
+     * @param mixed $hook_suffix Идентификатор текущего экрана.
      */
-    public static function enqueue_assets( string $hook_suffix ): void {
+    public static function enqueue_assets( mixed $hook_suffix ): void {
+        $hook_suffix        = (string) $hook_suffix;
         $is_settings_screen = ( 'toplevel_page_' . self::PAGE_SLUG === $hook_suffix );
         $is_post_screen     = in_array( $hook_suffix, [ 'post.php', 'post-new.php' ], true );
 
