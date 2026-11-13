@@ -372,5 +372,150 @@
                 processNextLanguage(queue, 0, params);
             });
         }
+
+        // ============================================================
+        // 3. Кнопка сброса системного промпта к эталонному SEO-стандарту
+        // ============================================================
+        const $btnResetPrompt = $('#plu-reset-prompt-btn');
+        if ($btnResetPrompt.length) {
+            $btnResetPrompt.on('click', function(e) {
+                e.preventDefault();
+                if (typeof pluAdminData !== 'undefined' && pluAdminData.default_system_prompt) {
+                    $('#plu_system_prompt').val(pluAdminData.default_system_prompt).trigger('change');
+                    $('#plu-reset-prompt-status').fadeIn(150);
+                }
+            });
+        }
+
+        // ============================================================
+        // 4. Логика вкладки «🍔 Дубликатор Меню»
+        // ============================================================
+        const $menuBox = $('#plu-menu-duplicator-box');
+        const $menuRunBtn = $('#plu-run-menu-duplicator');
+
+        if ($menuBox.length && $menuRunBtn.length) {
+            const $menuSpinner = $('#plu-menu-duplicator-spinner');
+            const $menuLog = $('#plu-menu-duplicator-log');
+            const $sourceLangSelect = $('#plu_menu_source_lang');
+
+            // Автоматически снимаем галочку с исходного языка при его переключении
+            $sourceLangSelect.on('change', function() {
+                const src = String($(this).val() || '');
+                $menuBox.find('.plu-menu-target-lang-cb').each(function() {
+                    if (String($(this).val()) === src) {
+                        $(this).prop('checked', false);
+                    }
+                });
+            });
+
+            const processNextMenuLang = function(queue, index, params) {
+                if (index >= queue.length) {
+                    $menuRunBtn.prop('disabled', false);
+                    $menuSpinner.removeClass('is-active');
+                    $menuLog.append(
+                        '<div class="plu-log-item is-success"><strong>&#127881; Клонирование меню для выбранных языков завершено.</strong></div>'
+                    );
+                    return;
+                }
+
+                const langItem = queue[index];
+                const stepNum = index + 1;
+                const totalNum = queue.length;
+                const langUpper = esc(langItem.slug.toUpperCase());
+                const rowId = 'plu-menu-log-step-' + langItem.slug;
+
+                $menuLog.append(
+                    `<div class="plu-log-item" id="${esc(rowId)}">&#9203; Обработка меню для языка ${langUpper} (${stepNum} из ${totalNum})...</div>`
+                );
+
+                $.ajax({
+                    url: pluAdminData.ajax_url,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: {
+                        action: 'plu_duplicate_menu',
+                        nonce: pluAdminData.nonce,
+                        source_menu_id: params.sourceMenuId,
+                        source_lang: params.sourceLang,
+                        target_lang: langItem.slug,
+                        translate_mode: params.translateMode,
+                        translate_custom_labels: params.translateCustomLabels ? 1 : 0,
+                        assign_locations: params.assignLocations ? 1 : 0,
+                        overwrite_menu: params.overwriteMenu ? 1 : 0
+                    },
+                    success: function(response) {
+                        const $stepRow = $('#' + rowId);
+
+                        if (response.success && response.data) {
+                            const d = response.data;
+                            const actionText = d.overwritten ? 'обновлено' : 'создано';
+                            const locText = (Array.isArray(d.assigned_locations) && d.assigned_locations.length > 0)
+                                ? `Локации темы: <code>${esc(d.assigned_locations.join(', '))}</code>`
+                                : 'Локации темы: не привязаны (у исходного меню не было локаций)';
+
+                            $stepRow.addClass('is-success').html(`
+                                <div>
+                                    <strong>&#9989; Меню «${esc(d.menu_name)}» (${esc(d.lang_upper)}) ${esc(actionText)}!</strong>
+                                    <span style="color:#646970;">(пунктов: ${esc(d.items_count)}, переведено строк: ${esc(d.translated_count)}, провайдер: ${esc(d.provider_label)})</span>
+                                </div>
+                                <div class="plu-log-note">${locText}</div>
+                                <div class="plu-log-links">
+                                    ${d.edit_url ? `<a href="${esc(d.edit_url)}" class="button button-small" target="_blank" rel="noopener noreferrer">&#9998;&#65039; Редактировать меню в WP</a>` : ''}
+                                </div>
+                            `);
+                        } else {
+                            const msg = (response.data && response.data.message) ? response.data.message : 'Ошибка клонирования меню.';
+                            $stepRow.addClass('is-error').html(`<strong>&#10060; ${langUpper}:</strong> ${esc(msg)}`);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        const $stepRow = $('#' + rowId);
+                        const serverMsg = (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message)
+                            ? xhr.responseJSON.data.message
+                            : '';
+                        const displayErr = serverMsg
+                            ? `${esc(serverMsg)} (HTTP ${esc(xhr.status || 500)})`
+                            : `Сетевая ошибка (${esc(error || status)}, HTTP ${esc(xhr.status || 500)})`;
+                        $stepRow.addClass('is-error').html(`<strong>&#10060; ${langUpper}:</strong> ${displayErr}`);
+                    },
+                    complete: function() {
+                        processNextMenuLang(queue, index + 1, params);
+                    }
+                });
+            };
+
+            $menuRunBtn.on('click', function(e) {
+                e.preventDefault();
+
+                const queue = [];
+                $menuBox.find('.plu-menu-target-lang-cb:checked').each(function() {
+                    queue.push({
+                        slug: String($(this).val()),
+                        name: String($(this).attr('data-lang-name') || $(this).val())
+                    });
+                });
+
+                $menuLog.empty().show();
+
+                if (queue.length === 0) {
+                    $menuLog.html('<div class="plu-log-item is-warning">&#9888; Выберите хотя бы один целевой язык.</div>');
+                    return;
+                }
+
+                const params = {
+                    sourceMenuId: parseInt($('#plu_menu_source_id').val(), 10) || 0,
+                    sourceLang: String($sourceLangSelect.val() || ''),
+                    translateMode: String($('#plu_menu_translate_mode').val() || 'gtx'),
+                    translateCustomLabels: $('#plu_menu_translate_custom_labels').is(':checked'),
+                    assignLocations: $('#plu_menu_assign_locations').is(':checked'),
+                    overwriteMenu: $('#plu_menu_overwrite').is(':checked')
+                };
+
+                $menuRunBtn.prop('disabled', true);
+                $menuSpinner.addClass('is-active');
+
+                processNextMenuLang(queue, 0, params);
+            });
+        }
     });
 })(jQuery);

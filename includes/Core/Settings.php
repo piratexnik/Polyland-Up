@@ -28,7 +28,7 @@ final class Settings {
             'default_translator' => 'gtx',
             'gemini_api_key'     => '',
             'gemini_model'       => 'gemini-2.5-flash',
-            'system_prompt'      => "Ты — профессиональный технический SEO-локализатор для корпоративного сайта. Переводи тексты точно по смыслу, сохраняя деловой и экспертный тон. СТРОГИЕ ПРАВИЛА: 1) Сохраняй все HTML-теги, шорткоды и переменные Rank Math (%sep%, %sitename%, %title%) без изменений. 2) При переводе на английский (EN) или другие латинские языки полностью исключай остаточную кириллицу как в видимом тексте, так и в атрибутах alt/title. 3) Соблюдай терминологию из глоссария ниже.",
+            'system_prompt'      => "Ты — профессиональный технический SEO-локализатор для корпоративного сайта. Переводи тексты точно по смыслу, сохраняя деловой и экспертный тон.\n\nСТРОГИЕ ПРАВИЛА:\n1) Сохраняй все HTML-теги, шорткоды и переменные Rank Math (%sep%, %sitename%, %title%) без изменений.\n2) При переводе на английский (EN) или другие латинские языки полностью исключай остаточную кириллицу как в видимом тексте, так и в атрибутах alt/title.\n3) Правила для ключей Rank Math SEO:\n- Для ключа __meta__rank_math_title (SEO Title): емкий коммерческий перевод длиной до 55–60 символов (без учета переменных %sep% %sitename%).\n- Для ключа __meta__rank_math_description (Meta Description): привлекательный SEO-перевод длиной до 150–160 символов.\n- Для ключа __meta__rank_math_focus_keyword: точный высокочастотный поисковый ключ на целевом языке.\n4) Соблюдай терминологию из глоссария ниже.",
             'github_token'       => '',
         ];
 
@@ -130,9 +130,10 @@ final class Settings {
             'plu-admin-js',
             'pluAdminData',
             [
-                'ajax_url'    => admin_url( 'admin-ajax.php' ),
-                'nonce'       => wp_create_nonce( 'plu_admin_nonce' ),
-                'clone_nonce' => wp_create_nonce( 'plu_clone_nonce' ),
+                'ajax_url'              => admin_url( 'admin-ajax.php' ),
+                'nonce'                 => wp_create_nonce( 'plu_admin_nonce' ),
+                'clone_nonce'           => wp_create_nonce( 'plu_clone_nonce' ),
+                'default_system_prompt' => (string) self::get_default( 'system_prompt' ),
                 'i18n'        => [
                     'no_langs_selected'  => __( 'Выберите хотя бы один целевой язык.', 'polyland-up' ),
                     'overwrite_required' => __( 'Вы выбрали язык(и), для которых перевод уже существует. Отметьте галочку перезаписи или снимите выделение.', 'polyland-up' ),
@@ -397,6 +398,14 @@ final class Settings {
             rows="8"
             class="large-text"
         ><?php echo esc_textarea( $prompt ); ?></textarea>
+        <div style="margin-top: 6px; display: flex; align-items: center; gap: 10px;">
+            <button type="button" id="plu-reset-prompt-btn" class="button button-secondary">
+                <?php esc_html_e( '🔄 Сбросить промпт к эталонному SEO-стандарту', 'polyland-up' ); ?>
+            </button>
+            <span id="plu-reset-prompt-status" style="color: #1a7a28; font-size: 12px; display: none;">
+                <?php esc_html_e( 'Промпт сброшен. Не забудьте сохранить изменения.', 'polyland-up' ); ?>
+            </span>
+        </div>
         <p class="description">
             <?php esc_html_e( 'Инструкция для модели Gemini при переводе контента, шорткодов Divi 5 и переменных Rank Math SEO.', 'polyland-up' ); ?>
         </p>
@@ -888,7 +897,11 @@ final class Settings {
         $active_tab = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'general';
         $tabs = [
             'general' => __( 'Основные', 'polyland-up' ),
+            'menus'   => __( '🍔 Дубликатор Меню', 'polyland-up' ),
         ];
+        if ( ! array_key_exists( $active_tab, $tabs ) ) {
+            $active_tab = 'general';
+        }
 
         // Статус Polylang
         $is_polylang_active = function_exists( 'pll_current_language' ) || defined( 'POLYLANG_VERSION' );
@@ -960,6 +973,8 @@ final class Settings {
                         submit_button( __( 'Сохранить изменения', 'polyland-up' ) );
                         ?>
                     </form>
+                <?php elseif ( 'menus' === $active_tab ) : ?>
+                    <?php \PolylangUp\Modules\MenuDuplicator::render_tab_content(); ?>
                 <?php endif; ?>
             </div>
         </div>

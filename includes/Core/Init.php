@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace PolylangUp\Core;
 
+use PolylangUp\Modules\MenuDuplicator;
 use PolylangUp\Modules\MetaboxUI;
 use PolylangUp\Modules\SameSlug;
 
@@ -27,6 +28,7 @@ final class Init {
             Settings::init();
             Updater::init();
             MetaboxUI::init();
+            MenuDuplicator::init();
         }
 
         // Модуль одинаковых слагов работает как в админке, так и на фронтенде

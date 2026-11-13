@@ -17,6 +17,7 @@
   - `includes/Modules/DiviParser.php` — Парсер блоков Divi 5 / шорткодов / Rank Math.
   - `includes/Modules/TranslatorAPI.php` — Шлюз Google Translate GTX и Gemini API.
   - `includes/Modules/LinkRewriter.php` — Умная перелинковка внутренних ссылок.
+  - `includes/Modules/MenuDuplicator.php` — Модуль дублирования и перевода меню WordPress / Polylang.
 - `assets/js/admin.js`, `assets/css/admin.css` — Ассеты админки.
 - `DOCS.md` — Технический паспорт проекта и архитектурная документация.
 

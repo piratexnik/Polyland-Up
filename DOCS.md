@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `1.9`
+- **Текущая версия:** `2.0`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -35,11 +35,12 @@ Polyland-Up/
         ├── MetaboxUI.php     # Метабокс в сайдбаре редактора и клонирование (Этап 3)
         ├── DiviParser.php    # Рекурсивный парсер блоков Divi 5, шорткодов и Rank Math (Этап 4)
         ├── TranslatorAPI.php # Шлюз Google Translate GTX и Gemini API (Этап 5)
-        └── LinkRewriter.php  # Умная перелинковка внутренних ссылок (Этап 6)
+        ├── LinkRewriter.php  # Умная перелинковка внутренних ссылок (Этап 6)
+        └── MenuDuplicator.php # AI Дубликатор и Переводчик Меню WordPress / Polylang
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '1.9'
+- `PLU_VERSION` — '2.0'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
