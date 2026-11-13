@@ -60,6 +60,7 @@ final class ScatCatalogTranslator {
 
         add_action( 'wp_ajax_plu_scat_stats', [ self::class, 'ajax_get_stats' ] );
         add_action( 'wp_ajax_plu_scat_translate_batch', [ self::class, 'ajax_translate_batch' ] );
+        add_action( 'admin_init', [ self::class, 'maybe_handle_export' ], 1 );
     }
 
     /**
@@ -234,11 +235,11 @@ final class ScatCatalogTranslator {
         $default_translator = (string) plu_get_option( 'default_translator', 'gtx' );
         $default_engine     = 'gemini' === $default_translator ? 'gemini' : 'gtx';
         $sql_export_url     = wp_nonce_url(
-            admin_url( 'admin-post.php?action=plu_scat_export_sql' ),
+            admin_url( 'admin.php?page=polylang-up&tab=scat_catalog&plu_scat_export=sql' ),
             'plu_scat_export_nonce'
         );
         $csv_export_url     = wp_nonce_url(
-            admin_url( 'admin-post.php?action=plu_scat_export_csv' ),
+            admin_url( 'admin.php?page=polylang-up&tab=scat_catalog&plu_scat_export=csv' ),
             'plu_scat_export_nonce'
         );
         ?>
@@ -1160,38 +1161,85 @@ final class ScatCatalogTranslator {
     }
 
     /**
-     * Обработчик admin-post для скачивания SQL-бэкапа 4 таблиц каталога SCaT.
+     * Перехватчик запроса скачивания SQL-бэкапа или Excel/CSV-выгрузки каталога SCaT на хуке admin_init.
      */
-    public static function handle_export_sql(): void {
-        check_admin_referer( 'plu_scat_export_nonce' );
+    public static function maybe_handle_export(): void {
+        if ( empty( $_GET['plu_scat_export'] ) ) {
+            return;
+        }
+
+        $export_type = sanitize_key( (string) wp_unslash( $_GET['plu_scat_export'] ) );
+        if ( ! in_array( $export_type, [ 'sql', 'csv' ], true ) ) {
+            return;
+        }
 
         if ( ! current_user_can( 'manage_options' ) ) {
             wp_die( esc_html__( 'У вас недостаточно прав для выполнения этого действия.', 'polyland-up' ), '', [ 'response' => 403 ] );
         }
 
-        @set_time_limit( 300 );
-
-        while ( ob_get_level() > 0 ) {
-            ob_end_clean();
+        $nonce = isset( $_GET['_wpnonce'] ) ? sanitize_text_field( (string) wp_unslash( $_GET['_wpnonce'] ) ) : '';
+        if ( ! wp_verify_nonce( $nonce, 'plu_scat_export_nonce' ) ) {
+            wp_die( esc_html__( 'Неверный или просроченный токен безопасности. Обновите страницу и повторите попытку.', 'polyland-up' ), '', [ 'response' => 403 ] );
         }
 
-        $timestamp = function_exists( 'wp_date' ) ? wp_date( 'Y-m-d_H-i' ) : gmdate( 'Y-m-d_H-i' );
-        $filename  = 'scat-catalog-backup-' . $timestamp . '.sql';
-
-        if ( function_exists( 'nocache_headers' ) ) {
-            nocache_headers();
+        if ( function_exists( 'set_time_limit' ) ) {
+            @set_time_limit( 300 );
         }
-        header( 'Content-Type: application/sql; charset=utf-8' );
-        header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
-        header( 'X-Content-Type-Options: nosniff' );
 
-        $out = fopen( 'php://output', 'wb' );
-        if ( false !== $out ) {
-            self::write_sql_backup( $out );
+        $tmp = null;
+        try {
+            $tmp = fopen( 'php://temp', 'r+b' );
+            if ( false === $tmp ) {
+                throw new \RuntimeException( 'Failed to open php://temp stream.' );
+            }
+
+            $timestamp = function_exists( 'wp_date' ) ? wp_date( 'Y-m-d_H-i' ) : gmdate( 'Y-m-d_H-i' );
+
+            if ( 'sql' === $export_type ) {
+                $content_type = 'application/sql; charset=utf-8';
+                $filename     = 'scat-catalog-backup-' . $timestamp . '.sql';
+                self::write_sql_backup( $tmp );
+            } else {
+                $content_type = 'text/csv; charset=utf-8';
+                $filename     = 'scat-catalog-' . $timestamp . '.csv';
+                self::write_csv_export( $tmp );
+            }
+
+            $size = ftell( $tmp );
+            rewind( $tmp );
+
+            while ( ob_get_level() > 0 ) {
+                ob_end_clean();
+            }
+
+            if ( function_exists( 'nocache_headers' ) ) {
+                nocache_headers();
+            }
+            header( 'Content-Type: ' . $content_type );
+            header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+            if ( is_int( $size ) && $size >= 0 && ! ini_get( 'zlib.output_compression' ) ) {
+                header( 'Content-Length: ' . (string) $size );
+            }
+            header( 'X-Content-Type-Options: nosniff' );
+
+            $out = fopen( 'php://output', 'wb' );
+            if ( false === $out ) {
+                throw new \RuntimeException( 'Failed to open php://output stream.' );
+            }
+
+            stream_copy_to_stream( $tmp, $out );
             fclose( $out );
+            fclose( $tmp );
+            exit;
+        } catch ( \Throwable $e ) {
+            if ( is_resource( $tmp ) ) {
+                fclose( $tmp );
+            }
+            while ( ob_get_level() > 0 ) {
+                ob_end_clean();
+            }
+            wp_die( 'Export Error: ' . esc_html( $e->getMessage() ) );
         }
-
-        exit;
     }
 
     /**
@@ -1228,7 +1276,13 @@ final class ScatCatalogTranslator {
             fwrite( $stream, "-- --------------------------------------------------------\n" );
             fwrite( $stream, "DROP TABLE IF EXISTS `{$table}`;\n" );
 
+            if ( property_exists( $wpdb, 'last_error' ) ) {
+                $wpdb->last_error = '';
+            }
             $create_row = $wpdb->get_row( "SHOW CREATE TABLE `{$table}`", \ARRAY_A );
+            if ( ! empty( $wpdb->last_error ) ) {
+                throw new \RuntimeException( (string) $wpdb->last_error );
+            }
             if ( is_array( $create_row ) && ! empty( $create_row ) ) {
                 $create_vals = array_values( $create_row );
                 $create_sql  = (string) ( $create_vals[1] ?? '' );
@@ -1239,6 +1293,9 @@ final class ScatCatalogTranslator {
 
             $offset = 0;
             while ( true ) {
+                if ( property_exists( $wpdb, 'last_error' ) ) {
+                    $wpdb->last_error = '';
+                }
                 $rows = $wpdb->get_results(
                     $wpdb->prepare(
                         "SELECT * FROM `{$table}` ORDER BY `Id` ASC LIMIT %d OFFSET %d",
@@ -1247,6 +1304,9 @@ final class ScatCatalogTranslator {
                     ),
                     \ARRAY_A
                 );
+                if ( ! empty( $wpdb->last_error ) ) {
+                    throw new \RuntimeException( (string) $wpdb->last_error );
+                }
 
                 if ( ! is_array( $rows ) || empty( $rows ) ) {
                     break;
@@ -1304,8 +1364,12 @@ final class ScatCatalogTranslator {
         }
 
         global $wpdb;
-        if ( is_object( $wpdb ) && isset( $wpdb->dbh ) && $wpdb->dbh instanceof \mysqli ) {
-            return "'" . mysqli_real_escape_string( $wpdb->dbh, $str ) . "'";
+        if ( is_object( $wpdb ) && method_exists( $wpdb, '_real_escape' ) ) {
+            $escaped = (string) $wpdb->_real_escape( $str );
+            if ( method_exists( $wpdb, 'remove_placeholder_escape' ) ) {
+                $escaped = (string) $wpdb->remove_placeholder_escape( $escaped );
+            }
+            return "'" . $escaped . "'";
         }
 
         $escaped = strtr(
@@ -1322,41 +1386,6 @@ final class ScatCatalogTranslator {
         );
 
         return "'" . $escaped . "'";
-    }
-
-    /**
-     * Обработчик admin-post для экспорта 4 таблиц каталога SCaT в Excel / CSV (UTF-8 BOM, разделитель ';').
-     */
-    public static function handle_export_csv(): void {
-        check_admin_referer( 'plu_scat_export_nonce' );
-
-        if ( ! current_user_can( 'manage_options' ) ) {
-            wp_die( esc_html__( 'У вас недостаточно прав для выполнения этого действия.', 'polyland-up' ), '', [ 'response' => 403 ] );
-        }
-
-        @set_time_limit( 300 );
-
-        while ( ob_get_level() > 0 ) {
-            ob_end_clean();
-        }
-
-        $timestamp = function_exists( 'wp_date' ) ? wp_date( 'Y-m-d_H-i' ) : gmdate( 'Y-m-d_H-i' );
-        $filename  = 'scat-catalog-' . $timestamp . '.csv';
-
-        if ( function_exists( 'nocache_headers' ) ) {
-            nocache_headers();
-        }
-        header( 'Content-Type: text/csv; charset=utf-8' );
-        header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
-        header( 'X-Content-Type-Options: nosniff' );
-
-        $out = fopen( 'php://output', 'wb' );
-        if ( false !== $out ) {
-            self::write_csv_export( $out );
-            fclose( $out );
-        }
-
-        exit;
     }
 
     /**
@@ -1396,6 +1425,9 @@ final class ScatCatalogTranslator {
 
             $offset = 0;
             while ( true ) {
+                if ( property_exists( $wpdb, 'last_error' ) ) {
+                    $wpdb->last_error = '';
+                }
                 $rows = $wpdb->get_results(
                     $wpdb->prepare(
                         "SELECT `Id`, `Sku`, `Name`, `Name3`, `Name2`, `Descr`, `Descr3`, `Descr2`
@@ -1407,6 +1439,9 @@ final class ScatCatalogTranslator {
                     ),
                     \ARRAY_A
                 );
+                if ( ! empty( $wpdb->last_error ) ) {
+                    throw new \RuntimeException( (string) $wpdb->last_error );
+                }
 
                 if ( ! is_array( $rows ) || empty( $rows ) ) {
                     break;

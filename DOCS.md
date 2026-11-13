@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `2.3`
+- **Текущая версия:** `2.4`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -41,7 +41,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '2.3'
+- `PLU_VERSION` — '2.4'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -197,6 +197,7 @@ plu_get_option( string $key, mixed $default = '' ): mixed
    - Клиент (`admin.js`) автоматически отключает чекбокс исходного языка в списке целевых языков, отображает прогресс-бар (`0%..100%`), счетчики экономии дедупликации, подробный лог и кнопку остановки «⏸ Остановить».
 3. **Инженерный глоссарий SCaT (`Settings::get_default('system_prompt')`):**
    - Закрепляет отраслевую украинскую терминологию SCaT (*«лоток драбинного типу» / «драбинний лоток»*, *«оцинкований за методом Сендзіміра»*, *«металорукав»*) и требование сохранности артикулов, серий и габаритных размеров.
-4. **Резервное копирование и экспорт таблиц (`admin-post.php` с Nonce `plu_scat_export_nonce` и правами `manage_options`):**
-   - `plu_scat_export_sql`: потоковая генерация `scat-catalog-backup-{Y-m-d_H-i}.sql` (`DROP TABLE IF EXISTS`, `SHOW CREATE TABLE`, пакетный `INSERT INTO` с экранированием через `mysqli_real_escape_string` и HEX-форматом для бинарных/не-UTF8 значений).
-   - `plu_scat_export_csv`: потоковая генерация `scat-catalog-{Y-m-d_H-i}.csv` с обязательным UTF-8 BOM (`\xEF\xBB\xBF`), разделителем `;` и колонками `Table`, `Id`, `Sku`, `Name (RU)`, `Name3 (UA)`, `Name2 (EN)`, `Descr (RU)`, `Descr3 (UA)`, `Descr2 (EN)`.
+4. **Резервное копирование и экспорт таблиц (перехват `admin_init` priority 1, параметр `plu_scat_export=sql|csv`, Nonce `plu_scat_export_nonce`, права `manage_options`):**
+   - Безопасная потоковая буферизация во временный поток `php://temp`, очистка буферов вывода (`ob_end_clean()`) и защита через `try / catch ( \Throwable )` с выводом ошибки через `wp_die()`.
+   - `plu_scat_export=sql`: генерация `scat-catalog-backup-{Y-m-d_H-i}.sql` (`DROP TABLE IF EXISTS`, `SHOW CREATE TABLE`, пакетный `INSERT INTO` с экранированием через `$wpdb->_real_escape()` + `remove_placeholder_escape()` без прямого обращения к защищенному `$wpdb->dbh`, а также HEX-формат для бинарных/не-UTF8 значений).
+   - `plu_scat_export=csv`: генерация `scat-catalog-{Y-m-d_H-i}.csv` с обязательным UTF-8 BOM (`\xEF\xBB\xBF`), разделителем `;`, явным 5-м аргументом `$escape = '\\'` в `fputcsv()` и колонками `Table`, `Id`, `Sku`, `Name (RU)`, `Name3 (UA)`, `Name2 (EN)`, `Descr (RU)`, `Descr3 (UA)`, `Descr2 (EN)`.
