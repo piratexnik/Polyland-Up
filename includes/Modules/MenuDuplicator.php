@@ -232,7 +232,10 @@ final class MenuDuplicator {
             ] );
         }
 
-        @set_time_limit( 120 );
+        @set_time_limit( 300 );
+        if ( function_exists( 'ignore_user_abort' ) ) {
+            ignore_user_abort( true );
+        }
 
         $source_menu_id          = isset( $_POST['source_menu_id'] ) ? (int) $_POST['source_menu_id'] : 0;
         $source_lang             = isset( $_POST['source_lang'] ) ? sanitize_key( (string) $_POST['source_lang'] ) : '';

@@ -267,7 +267,10 @@ final class MetaboxUI {
             ] );
         }
 
-        @set_time_limit( 120 );
+        @set_time_limit( 300 );
+        if ( function_exists( 'ignore_user_abort' ) ) {
+            ignore_user_abort( true );
+        }
 
         $mode = sanitize_key( (string) ( $_POST['mode'] ?? 'clone_only' ) );
         if ( ! in_array( $mode, [ 'clone_only', 'translate_gtx', 'translate_gemini' ], true ) ) {

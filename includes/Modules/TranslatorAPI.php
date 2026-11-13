@@ -387,7 +387,7 @@ final class TranslatorAPI {
     }
 
     /**
-     * Провайдер 2: Нейросетевой пакетный перевод через Google Gemini API (чанки по 40 элементов).
+     * Провайдер 2: Нейросетевой пакетный перевод через Google Gemini API (чанки по 90 элементов).
      *
      * @param array<string, string> $dictionary Словарь исходных строк.
      * @param string                $sl         Нормализованный код исходного языка.
@@ -420,11 +420,23 @@ final class TranslatorAPI {
 
         $full_system_instruction = '' !== $user_prompt ? ( $user_prompt . "\n\n" . $tech_prompt ) : $tech_prompt;
 
-        $endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( $model ) . ':generateContent';
-        $chunks   = array_chunk( $dictionary, 40, true );
-        $result   = [];
+        $endpoint            = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( $model ) . ':generateContent';
+        $chunks              = array_chunk( $dictionary, 90, true );
+        $result              = [];
+        $use_thinking_config = ( stripos( $model, 'flash' ) !== false || stripos( $model, 'hydrogen' ) !== false );
 
         foreach ( $chunks as $chunk ) {
+            $generation_config = [
+                'responseMimeType' => 'application/json',
+                'temperature'      => 0.1,
+            ];
+
+            if ( $use_thinking_config ) {
+                $generation_config['thinkingConfig'] = [
+                    'thinkingBudget' => 0,
+                ];
+            }
+
             $payload = [
                 'systemInstruction' => [
                     'parts' => [
@@ -439,14 +451,11 @@ final class TranslatorAPI {
                         ],
                     ],
                 ],
-                'generationConfig' => [
-                    'responseMimeType' => 'application/json',
-                    'temperature'      => 0.2,
-                ],
+                'generationConfig' => $generation_config,
             ];
 
             $request_args = [
-                'timeout' => 60,
+                'timeout' => 90,
                 'headers' => [
                     'Content-Type'   => 'application/json',
                     'x-goog-api-key' => $api_key,
@@ -455,6 +464,21 @@ final class TranslatorAPI {
             ];
 
             $response = wp_remote_post( $endpoint, $request_args );
+
+            // Страховка: если модель не поддерживает thinkingConfig (HTTP 400), повторяем без него
+            if (
+                $use_thinking_config &&
+                ! is_wp_error( $response ) &&
+                400 === (int) wp_remote_retrieve_response_code( $response )
+            ) {
+                $err_body = (string) wp_remote_retrieve_body( $response );
+                if ( stripos( $err_body, 'thinkingConfig' ) !== false || stripos( $err_body, 'thinking' ) !== false ) {
+                    $use_thinking_config = false;
+                    unset( $payload['generationConfig']['thinkingConfig'] );
+                    $request_args['body'] = (string) wp_json_encode( $payload );
+                    $response             = wp_remote_post( $endpoint, $request_args );
+                }
+            }
 
             // Повторная попытка при временной ошибке 429 / 503
             if ( ! is_wp_error( $response ) && in_array( (int) wp_remote_retrieve_response_code( $response ), [ 429, 503 ], true ) ) {
