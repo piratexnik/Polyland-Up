@@ -233,6 +233,14 @@ final class ScatCatalogTranslator {
         $stats              = self::get_catalog_stats();
         $default_translator = (string) plu_get_option( 'default_translator', 'gtx' );
         $default_engine     = 'gemini' === $default_translator ? 'gemini' : 'gtx';
+        $sql_export_url     = wp_nonce_url(
+            admin_url( 'admin-post.php?action=plu_scat_export_sql' ),
+            'plu_scat_export_nonce'
+        );
+        $csv_export_url     = wp_nonce_url(
+            admin_url( 'admin-post.php?action=plu_scat_export_csv' ),
+            'plu_scat_export_nonce'
+        );
         ?>
         <div class="plu-scat-wrap" id="plu-scat-catalog-box">
             <!-- Блок 1: Живая статистика заполненности БД -->
@@ -249,6 +257,12 @@ final class ScatCatalogTranslator {
                         <button type="button" id="plu-scat-refresh-stats" class="button button-secondary">
                             <?php esc_html_e( '🔄 Обновить статистику', 'polyland-up' ); ?>
                         </button>
+                        <a href="<?php echo esc_url( $sql_export_url ); ?>" class="button button-secondary">
+                            <?php esc_html_e( '💾 Скачать SQL-бэкап 4 таблиц (.sql)', 'polyland-up' ); ?>
+                        </a>
+                        <a href="<?php echo esc_url( $csv_export_url ); ?>" class="button button-secondary">
+                            <?php esc_html_e( '📊 Скачать в Excel / CSV (.csv)', 'polyland-up' ); ?>
+                        </a>
                     </div>
                 </div>
 
@@ -1143,5 +1157,287 @@ final class ScatCatalogTranslator {
         }
 
         return $task_total > 0 ? min( $task_total, $scanned_done ) : $scanned_done;
+    }
+
+    /**
+     * Обработчик admin-post для скачивания SQL-бэкапа 4 таблиц каталога SCaT.
+     */
+    public static function handle_export_sql(): void {
+        check_admin_referer( 'plu_scat_export_nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'У вас недостаточно прав для выполнения этого действия.', 'polyland-up' ), '', [ 'response' => 403 ] );
+        }
+
+        @set_time_limit( 300 );
+
+        while ( ob_get_level() > 0 ) {
+            ob_end_clean();
+        }
+
+        $timestamp = function_exists( 'wp_date' ) ? wp_date( 'Y-m-d_H-i' ) : gmdate( 'Y-m-d_H-i' );
+        $filename  = 'scat-catalog-backup-' . $timestamp . '.sql';
+
+        if ( function_exists( 'nocache_headers' ) ) {
+            nocache_headers();
+        }
+        header( 'Content-Type: application/sql; charset=utf-8' );
+        header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+        header( 'X-Content-Type-Options: nosniff' );
+
+        $out = fopen( 'php://output', 'wb' );
+        if ( false !== $out ) {
+            self::write_sql_backup( $out );
+            fclose( $out );
+        }
+
+        exit;
+    }
+
+    /**
+     * Потоковая генерация SQL-дампа (DROP TABLE + SHOW CREATE TABLE + пакетный INSERT INTO) в поток.
+     *
+     * @param resource $stream Открытый файловый поток (php://output или php://temp).
+     */
+    public static function write_sql_backup( $stream ): void {
+        global $wpdb;
+
+        $generated_at = function_exists( 'wp_date' ) ? wp_date( 'Y-m-d H:i:s' ) : gmdate( 'Y-m-d H:i:s' );
+
+        fwrite( $stream, "-- Polyland-Up SCaT Catalog SQL Backup\n" );
+        fwrite( $stream, "-- Generated: {$generated_at}\n" );
+        fwrite( $stream, "SET NAMES utf8mb4;\n" );
+        fwrite( $stream, "SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n" );
+        fwrite( $stream, "SET FOREIGN_KEY_CHECKS = 0;\n\n" );
+
+        if ( ! is_object( $wpdb ) ) {
+            fwrite( $stream, "SET FOREIGN_KEY_CHECKS = 1;\n" );
+            return;
+        }
+
+        $fetch_limit  = 500;
+        $insert_batch = 100;
+
+        foreach ( array_keys( self::TABLES ) as $table ) {
+            if ( ! self::table_exists( $table ) ) {
+                continue;
+            }
+
+            fwrite( $stream, "-- --------------------------------------------------------\n" );
+            fwrite( $stream, "-- Table structure and data for `{$table}`\n" );
+            fwrite( $stream, "-- --------------------------------------------------------\n" );
+            fwrite( $stream, "DROP TABLE IF EXISTS `{$table}`;\n" );
+
+            $create_row = $wpdb->get_row( "SHOW CREATE TABLE `{$table}`", \ARRAY_A );
+            if ( is_array( $create_row ) && ! empty( $create_row ) ) {
+                $create_vals = array_values( $create_row );
+                $create_sql  = (string) ( $create_vals[1] ?? '' );
+                if ( '' !== $create_sql ) {
+                    fwrite( $stream, $create_sql . ";\n\n" );
+                }
+            }
+
+            $offset = 0;
+            while ( true ) {
+                $rows = $wpdb->get_results(
+                    $wpdb->prepare(
+                        "SELECT * FROM `{$table}` ORDER BY `Id` ASC LIMIT %d OFFSET %d",
+                        $fetch_limit,
+                        $offset
+                    ),
+                    \ARRAY_A
+                );
+
+                if ( ! is_array( $rows ) || empty( $rows ) ) {
+                    break;
+                }
+
+                $columns      = array_keys( $rows[0] );
+                $escaped_cols = array_map(
+                    static fn( string $col ): string => '`' . str_replace( '`', '``', $col ) . '`',
+                    array_map( 'strval', $columns )
+                );
+                $cols_sql     = implode( ', ', $escaped_cols );
+
+                foreach ( array_chunk( $rows, $insert_batch ) as $chunk ) {
+                    $values_lines = [];
+                    foreach ( $chunk as $row ) {
+                        $row_vals = [];
+                        foreach ( $columns as $col ) {
+                            $row_vals[] = self::format_sql_value( $row[ $col ] ?? null );
+                        }
+                        $values_lines[] = '  (' . implode( ', ', $row_vals ) . ')';
+                    }
+
+                    fwrite( $stream, "INSERT INTO `{$table}` ({$cols_sql}) VALUES\n" . implode( ",\n", $values_lines ) . ";\n\n" );
+                }
+
+                if ( count( $rows ) < $fetch_limit ) {
+                    break;
+                }
+
+                $offset += $fetch_limit;
+            }
+        }
+
+        fwrite( $stream, "SET FOREIGN_KEY_CHECKS = 1;\n" );
+    }
+
+    /**
+     * Строгое экранирование значения колонки для SQL INSERT (с поддержкой NULL и HEX для бинарных/невалидных байтов).
+     */
+    private static function format_sql_value( mixed $value ): string {
+        if ( null === $value ) {
+            return 'NULL';
+        }
+
+        $str = (string) $value;
+        if ( '' === $str ) {
+            return "''";
+        }
+
+        if (
+            str_contains( $str, "\0" ) ||
+            ( function_exists( 'mb_check_encoding' ) && ! mb_check_encoding( $str, 'UTF-8' ) )
+        ) {
+            return '0x' . bin2hex( $str );
+        }
+
+        global $wpdb;
+        if ( is_object( $wpdb ) && isset( $wpdb->dbh ) && $wpdb->dbh instanceof \mysqli ) {
+            return "'" . mysqli_real_escape_string( $wpdb->dbh, $str ) . "'";
+        }
+
+        $escaped = strtr(
+            $str,
+            [
+                '\\'   => '\\\\',
+                "\0"   => '\\0',
+                "\n"   => '\\n',
+                "\r"   => '\\r',
+                "'"    => "\\'",
+                '"'    => '\\"',
+                "\x1a" => '\\Z',
+            ]
+        );
+
+        return "'" . $escaped . "'";
+    }
+
+    /**
+     * Обработчик admin-post для экспорта 4 таблиц каталога SCaT в Excel / CSV (UTF-8 BOM, разделитель ';').
+     */
+    public static function handle_export_csv(): void {
+        check_admin_referer( 'plu_scat_export_nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'У вас недостаточно прав для выполнения этого действия.', 'polyland-up' ), '', [ 'response' => 403 ] );
+        }
+
+        @set_time_limit( 300 );
+
+        while ( ob_get_level() > 0 ) {
+            ob_end_clean();
+        }
+
+        $timestamp = function_exists( 'wp_date' ) ? wp_date( 'Y-m-d_H-i' ) : gmdate( 'Y-m-d_H-i' );
+        $filename  = 'scat-catalog-' . $timestamp . '.csv';
+
+        if ( function_exists( 'nocache_headers' ) ) {
+            nocache_headers();
+        }
+        header( 'Content-Type: text/csv; charset=utf-8' );
+        header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+        header( 'X-Content-Type-Options: nosniff' );
+
+        $out = fopen( 'php://output', 'wb' );
+        if ( false !== $out ) {
+            self::write_csv_export( $out );
+            fclose( $out );
+        }
+
+        exit;
+    }
+
+    /**
+     * Потоковая генерация CSV-файла с UTF-8 BOM и разделителем ';' для корректного открытия в Microsoft Excel.
+     *
+     * @param resource $stream Открытый файловый поток (php://output или php://temp).
+     */
+    public static function write_csv_export( $stream ): void {
+        global $wpdb;
+
+        // Обязательный UTF-8 BOM для распознавания кириллицы (RU/UA) в Microsoft Excel на Windows
+        fwrite( $stream, "\xEF\xBB\xBF" );
+
+        $headers = [
+            'Table',
+            'Id',
+            'Sku',
+            'Name (RU)',
+            'Name3 (UA)',
+            'Name2 (EN)',
+            'Descr (RU)',
+            'Descr3 (UA)',
+            'Descr2 (EN)',
+        ];
+        fputcsv( $stream, $headers, ';', '"', '\\' );
+
+        if ( ! is_object( $wpdb ) ) {
+            return;
+        }
+
+        $fetch_limit = 500;
+
+        foreach ( array_keys( self::TABLES ) as $table ) {
+            if ( ! self::table_exists( $table ) ) {
+                continue;
+            }
+
+            $offset = 0;
+            while ( true ) {
+                $rows = $wpdb->get_results(
+                    $wpdb->prepare(
+                        "SELECT `Id`, `Sku`, `Name`, `Name3`, `Name2`, `Descr`, `Descr3`, `Descr2`
+                         FROM `{$table}`
+                         ORDER BY `Id` ASC
+                         LIMIT %d OFFSET %d",
+                        $fetch_limit,
+                        $offset
+                    ),
+                    \ARRAY_A
+                );
+
+                if ( ! is_array( $rows ) || empty( $rows ) ) {
+                    break;
+                }
+
+                foreach ( $rows as $row ) {
+                    fputcsv(
+                        $stream,
+                        [
+                            $table,
+                            (string) ( $row['Id'] ?? '' ),
+                            (string) ( $row['Sku'] ?? '' ),
+                            (string) ( $row['Name'] ?? '' ),
+                            (string) ( $row['Name3'] ?? '' ),
+                            (string) ( $row['Name2'] ?? '' ),
+                            (string) ( $row['Descr'] ?? '' ),
+                            (string) ( $row['Descr3'] ?? '' ),
+                            (string) ( $row['Descr2'] ?? '' ),
+                        ],
+                        ';',
+                        '"',
+                        '\\'
+                    );
+                }
+
+                if ( count( $rows ) < $fetch_limit ) {
+                    break;
+                }
+
+                $offset += $fetch_limit;
+            }
+        }
     }
 }
