@@ -3,7 +3,7 @@
  * Plugin Name:       Polylang Divi 5 AI Auto-Translator & Same Slug
  * Plugin URI:        https://github.com/piratexnik/Polyland-Up
  * Description:       Автоматический переводчик для Divi 5 и Polylang с поддержкой одинаковых слагов (Same Slug), Google Translate и Gemini AI.
- * Version:           2.1
+ * Version:           2.2
  * Requires at least: 6.5
  * Requires PHP:      8.1
  * Author:            piratexnik
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Константы плагина
-define( 'PLU_VERSION', '2.1' );
+define( 'PLU_VERSION', '2.2' );
 define( 'PLU_FILE', __FILE__ );
 define( 'PLU_PATH', plugin_dir_path( __FILE__ ) );
 define( 'PLU_URL', plugin_dir_url( __FILE__ ) );

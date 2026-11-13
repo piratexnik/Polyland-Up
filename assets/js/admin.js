@@ -517,5 +517,456 @@
                 processNextMenuLang(queue, 0, params);
             });
         }
+
+        // ============================================================
+        // 5. Логика вкладки «📦 Каталог SCaT (БД)»
+        // ============================================================
+        const $scatBox = $('#plu-scat-catalog-box');
+        if ($scatBox.length) {
+            const $scatSourceSelect = $('#plu_scat_source_lang');
+            const $scatRefreshBtn = $('#plu-scat-refresh-stats');
+            const $scatStatsSpinner = $('#plu-scat-stats-spinner');
+            const $scatTbody = $('#plu-scat-stats-tbody');
+            const $scatTfoot = $('#plu-scat-stats-tfoot');
+
+            const $scatStartBtn = $('#plu-scat-start');
+            const $scatStopBtn = $('#plu-scat-stop');
+            const $scatSpinner = $('#plu-scat-spinner');
+            const $scatProgressWrap = $('#plu-scat-progress-wrap');
+            const $scatProgressLabel = $('#plu-scat-progress-label');
+            const $scatProgressPercent = $('#plu-scat-progress-percent');
+            const $scatProgressBar = $('#plu-scat-progress-bar');
+            const $scatProgressCounters = $('#plu-scat-progress-counters');
+            const $scatLog = $('#plu-scat-log');
+
+            const fmtNum = function(num) {
+                const n = parseInt(num, 10) || 0;
+                return n.toLocaleString('ru-RU');
+            };
+
+            const fmtCountCell = function(count, total) {
+                const c = parseInt(count, 10) || 0;
+                const t = parseInt(total, 10) || 0;
+                const pct = t > 0 ? Math.round((c / t) * 100) : 0;
+                return `${fmtNum(c)} (${pct}%)`;
+            };
+
+            const fmtDescrCell = function(count, unique, total) {
+                const c = parseInt(count, 10) || 0;
+                const u = parseInt(unique, 10) || 0;
+                const t = parseInt(total, 10) || 0;
+                const pct = t > 0 ? Math.round((c / t) * 100) : 0;
+                return `${fmtNum(c)} / ${pct}% (уник.: ${fmtNum(u)})`;
+            };
+
+            // Авто-отключение чекбокса языка, выбранного как исходный
+            const syncScatTargetLangs = function() {
+                const srcLang = String($scatSourceSelect.val() || 'ru');
+                $scatBox.find('.plu-scat-target-lang-cb').each(function() {
+                    const $cb = $(this);
+                    const $label = $cb.closest('.plu-menu-lang-item');
+                    if (String($cb.val()) === srcLang) {
+                        $cb.prop('checked', false).prop('disabled', true);
+                        $label.addClass('is-disabled');
+                    } else {
+                        $cb.prop('disabled', false);
+                        $label.removeClass('is-disabled');
+                    }
+                });
+            };
+
+            $scatSourceSelect.on('change', syncScatTargetLangs);
+            syncScatTargetLangs();
+
+            // Обновление живой таблицы статистики
+            const refreshScatStats = function() {
+                $scatRefreshBtn.prop('disabled', true);
+                $scatStatsSpinner.addClass('is-active');
+
+                $.ajax({
+                    url: pluAdminData.ajax_url,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: {
+                        action: 'plu_scat_stats',
+                        nonce: pluAdminData.nonce
+                    },
+                    success: function(response) {
+                        if (response.success && response.data && Array.isArray(response.data.tables)) {
+                            const rowsHtml = response.data.tables.map(function(row) {
+                                const total = parseInt(row.total, 10) || 0;
+                                if (!row.exists) {
+                                    return `
+                                        <tr data-scat-table-row="${esc(row.table)}">
+                                            <td>
+                                                <strong><code>${esc(row.table)}</code></strong>
+                                                <div style="font-size:12px; color:#50575e;">${esc(row.label)}</div>
+                                            </td>
+                                            <td colspan="7" style="color:#8c8f94; font-style:italic;">Таблица не найдена в базе данных</td>
+                                        </tr>
+                                    `;
+                                }
+                                return `
+                                    <tr data-scat-table-row="${esc(row.table)}">
+                                        <td>
+                                            <strong><code>${esc(row.table)}</code></strong>
+                                            <div style="font-size:12px; color:#50575e;">${esc(row.label)}</div>
+                                        </td>
+                                        <td class="num"><strong>${esc(fmtNum(total))}</strong></td>
+                                        <td class="num">${esc(fmtCountCell(row.names.ru, total))}</td>
+                                        <td class="num">${esc(fmtCountCell(row.names.uk, total))}</td>
+                                        <td class="num">${esc(fmtCountCell(row.names.en, total))}</td>
+                                        <td class="num">${esc(fmtDescrCell(row.descrs.ru, row.descrs_unique.ru, total))}</td>
+                                        <td class="num">${esc(fmtDescrCell(row.descrs.uk, row.descrs_unique.uk, total))}</td>
+                                        <td class="num">${esc(fmtDescrCell(row.descrs.en, row.descrs_unique.en, total))}</td>
+                                    </tr>
+                                `;
+                            }).join('');
+
+                            $scatTbody.html(rowsHtml);
+
+                            const totals = response.data.totals || {};
+                            const grandTotal = parseInt(totals.total, 10) || 0;
+                            const names = totals.names || {};
+                            const descrs = totals.descrs || {};
+                            const uniq = totals.descrs_unique || {};
+
+                            $scatTfoot.html(`
+                                <tr class="plu-scat-total-row">
+                                    <th><strong>ИТОГО</strong></th>
+                                    <th class="num"><strong>${esc(fmtNum(grandTotal))}</strong></th>
+                                    <th class="num"><strong>${esc(fmtCountCell(names.ru, grandTotal))}</strong></th>
+                                    <th class="num"><strong>${esc(fmtCountCell(names.uk, grandTotal))}</strong></th>
+                                    <th class="num"><strong>${esc(fmtCountCell(names.en, grandTotal))}</strong></th>
+                                    <th class="num"><strong>${esc(fmtDescrCell(descrs.ru, uniq.ru, grandTotal))}</strong></th>
+                                    <th class="num"><strong>${esc(fmtDescrCell(descrs.uk, uniq.uk, grandTotal))}</strong></th>
+                                    <th class="num"><strong>${esc(fmtDescrCell(descrs.en, uniq.en, grandTotal))}</strong></th>
+                                </tr>
+                            `);
+                        }
+                    },
+                    complete: function() {
+                        $scatRefreshBtn.prop('disabled', false);
+                        $scatStatsSpinner.removeClass('is-active');
+                    }
+                });
+            };
+
+            $scatRefreshBtn.on('click', function(e) {
+                e.preventDefault();
+                refreshScatStats();
+            });
+
+            // Пакетный конвейер перевода каталога SCaT
+            let isRunning = false;
+            let stopRequested = false;
+
+            const setScatRunning = function(running) {
+                isRunning = running;
+                $scatStartBtn.prop('disabled', running);
+                $scatStopBtn.prop('disabled', !running);
+                $scatBox.find('.plu-scat-table-cb, #plu_scat_source_lang, .plu-scat-target-lang-cb, #plu_scat_fields_mode, #plu_scat_overwrite_mode, #plu_scat_engine, #plu_scat_batch_size')
+                    .prop('disabled', running);
+                if (!running) {
+                    // Восстанавливаем отключенное состояние отсутствующих таблиц и исходного языка
+                    $scatBox.find('.plu-scat-check-card.is-disabled .plu-scat-table-cb').prop('disabled', true);
+                    syncScatTargetLangs();
+                    $scatSpinner.removeClass('is-active');
+                } else {
+                    $scatSpinner.addClass('is-active');
+                }
+            };
+
+            const appendScatLog = function(html, levelClass) {
+                const cls = levelClass ? ` ${levelClass}` : '';
+                $scatLog.show().append(`<div class="plu-log-item${cls}">${html}</div>`);
+                $scatLog.scrollTop($scatLog[0].scrollHeight);
+            };
+
+            const updateScatProgress = function(doneRows, totalRows, labelText, totalUniqueDone, totalUpdatedRows, totalSavedRequests) {
+                let pct = 0;
+                if (totalRows > 0) {
+                    pct = Math.min(100, Math.max(0, Math.round((doneRows / totalRows) * 100)));
+                }
+                $scatProgressWrap.show();
+                $scatProgressLabel.text(labelText);
+                $scatProgressPercent.text(`${pct}%`);
+                $scatProgressBar.css('width', `${pct}%`);
+                $scatProgressCounters.html(
+                    `Позиций в БД: <strong>${esc(fmtNum(doneRows))}</strong> / ${esc(fmtNum(totalRows))} &bull; ` +
+                    `Переведено уник. текстов: <strong>${esc(fmtNum(totalUniqueDone))}</strong> &bull; ` +
+                    `Обновлено строк: <strong>${esc(fmtNum(totalUpdatedRows))}</strong> &bull; ` +
+                    `Сэкономлено запросов (дедупликация): <strong>${esc(fmtNum(totalSavedRequests))}</strong>`
+                );
+            };
+
+            $scatStopBtn.on('click', function(e) {
+                e.preventDefault();
+                if (!isRunning) {
+                    return;
+                }
+                stopRequested = true;
+                $scatStopBtn.prop('disabled', true);
+                $scatProgressLabel.text('⏸ Остановка после завершения текущего шага...');
+            });
+
+            $scatStartBtn.on('click', function(e) {
+                e.preventDefault();
+                if (isRunning) {
+                    return;
+                }
+
+                const tables = [];
+                $scatBox.find('.plu-scat-table-cb:checked:not(:disabled)').each(function() {
+                    tables.push(String($(this).val()));
+                });
+
+                const sourceLang = String($scatSourceSelect.val() || 'ru');
+                const targetLangs = [];
+                $scatBox.find('.plu-scat-target-lang-cb:checked:not(:disabled)').each(function() {
+                    targetLangs.push(String($(this).val()));
+                });
+
+                const fieldsMode = String($('#plu_scat_fields_mode').val() || 'descr_only');
+                const overwriteMode = String($('#plu_scat_overwrite_mode').val() || 'empty_only');
+                const engine = String($('#plu_scat_engine').val() || 'gtx');
+                const batchSize = parseInt($('#plu_scat_batch_size').val(), 10) || 35;
+
+                $scatLog.empty().show();
+
+                if (tables.length === 0) {
+                    appendScatLog('&#9888; Выберите хотя бы одну таблицу каталога для обработки.', 'is-warning');
+                    return;
+                }
+
+                if (targetLangs.length === 0) {
+                    appendScatLog('&#9888; Выберите хотя бы один целевой язык.', 'is-warning');
+                    return;
+                }
+
+                stopRequested = false;
+                setScatRunning(true);
+                updateScatProgress(0, 0, 'Анализ таблиц и подсчет уникальных текстов…', 0, 0, 0);
+
+                // Шаг 0: планирование подзадач
+                $.ajax({
+                    url: pluAdminData.ajax_url,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: {
+                        action: 'plu_scat_translate_batch',
+                        nonce: pluAdminData.nonce,
+                        phase: 'plan',
+                        tables: tables,
+                        source_lang: sourceLang,
+                        target_langs: targetLangs,
+                        fields_mode: fieldsMode,
+                        overwrite_mode: overwriteMode
+                    },
+                    success: function(planResp) {
+                        if (!planResp.success || !planResp.data) {
+                            const msg = (planResp.data && planResp.data.message) ? planResp.data.message : 'Ошибка планирования задач.';
+                            appendScatLog(`&#10060; ${esc(msg)}`, 'is-error');
+                            setScatRunning(false);
+                            return;
+                        }
+
+                        const plan = planResp.data;
+                        const tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
+                        const grandTotalRows = parseInt(plan.grand_total_rows, 10) || 0;
+                        const grandTotalUnique = parseInt(plan.grand_total_unique, 10) || 0;
+
+                        if (grandTotalRows === 0 || tasks.length === 0) {
+                            updateScatProgress(1, 1, 'Все выбранные поля уже переведены!', 0, 0, 0);
+                            appendScatLog('&#9989; Все выбранные поля в отмеченных таблицах уже заполнены. Очередь пуста.', 'is-success');
+                            setScatRunning(false);
+                            return;
+                        }
+
+                        const estSavedPct = grandTotalRows > 0
+                            ? Math.max(0, Math.round(((grandTotalRows - grandTotalUnique) / grandTotalRows) * 100))
+                            : 0;
+
+                        appendScatLog(
+                            `&#128203; <strong>План сформирован:</strong> задач: ${esc(tasks.length)} &bull; ` +
+                            `записей к обработке: <strong>${esc(fmtNum(grandTotalRows))}</strong> &bull; ` +
+                            `уникальных текстов: <strong>${esc(fmtNum(grandTotalUnique))}</strong> (экономия дедупликации ~${esc(estSavedPct)}%).`,
+                            ''
+                        );
+
+                        let taskIdx = 0;
+                        let tableIndex = 0;
+                        let lastId = 0;
+                        let processedHashes = new Set();
+                        let completedPrevRows = 0;
+                        let currentTaskDone = 0;
+                        let totalUniqueDone = 0;
+                        let totalUpdatedRows = 0;
+                        let totalSavedRequests = 0;
+                        let stepNo = 0;
+
+                        const runNextBatch = function() {
+                            if (stopRequested) {
+                                appendScatLog('&#9209; Перевод остановлен пользователем. Уже переведенные батчи сохранены в БД.', 'is-warning');
+                                $scatProgressLabel.text('⏹ Остановлено пользователем');
+                                setScatRunning(false);
+                                refreshScatStats();
+                                return;
+                            }
+
+                            while (taskIdx < tasks.length && (parseInt(tasks[taskIdx].total_rows, 10) || 0) === 0) {
+                                const skippedTask = tasks[taskIdx];
+                                appendScatLog(
+                                    `&#9197; Пропуск <strong>${esc(skippedTask.lang_short)} (${esc(skippedTask.src_col)} &rarr; ${esc(skippedTask.dst_col)})</strong>: нет записей для обработки.`,
+                                    ''
+                                );
+                                taskIdx++;
+                                tableIndex = 0;
+                                lastId = 0;
+                                processedHashes = new Set();
+                                currentTaskDone = 0;
+                            }
+
+                            if (taskIdx >= tasks.length) {
+                                updateScatProgress(grandTotalRows, grandTotalRows, '🎉 Перевод каталога завершен!', totalUniqueDone, totalUpdatedRows, totalSavedRequests);
+                                appendScatLog(
+                                    `&#127881; <strong>Готово!</strong> Переведено уникальных текстов: <strong>${esc(fmtNum(totalUniqueDone))}</strong>, ` +
+                                    `обновлено записей в БД: <strong>${esc(fmtNum(totalUpdatedRows))}</strong>, ` +
+                                    `сэкономлено запросов: <strong>${esc(fmtNum(totalSavedRequests))}</strong>.`,
+                                    'is-success'
+                                );
+                                setScatRunning(false);
+                                refreshScatStats();
+                                return;
+                            }
+
+                            const task = tasks[taskIdx];
+                            stepNo++;
+
+                            const taskLabel = `${task.lang_short}: ${task.src_col} → ${task.dst_col} (шаг #${stepNo})`;
+                            updateScatProgress(
+                                completedPrevRows + currentTaskDone,
+                                grandTotalRows,
+                                `⏳ Обработка: ${taskLabel}…`,
+                                totalUniqueDone,
+                                totalUpdatedRows,
+                                totalSavedRequests
+                            );
+
+                            $.ajax({
+                                url: pluAdminData.ajax_url,
+                                type: 'POST',
+                                dataType: 'json',
+                                data: {
+                                    action: 'plu_scat_translate_batch',
+                                    nonce: pluAdminData.nonce,
+                                    phase: 'run',
+                                    tables: tables,
+                                    source_lang: sourceLang,
+                                    target_lang: task.target_lang,
+                                    field_type: task.field_type,
+                                    overwrite_mode: overwriteMode,
+                                    engine: engine,
+                                    batch_size: batchSize,
+                                    table_index: tableIndex,
+                                    last_id: lastId,
+                                    task_total_rows: task.total_rows,
+                                    table_counts: task.table_counts,
+                                    processed_hashes: Array.from(processedHashes).join(',')
+                                },
+                                success: function(batchResp) {
+                                    if (!batchResp.success || !batchResp.data) {
+                                        const errMsg = (batchResp.data && batchResp.data.message) ? batchResp.data.message : 'Ошибка пакетного перевода.';
+                                        appendScatLog(`&#10060; <strong>Шаг #${esc(stepNo)} (${esc(task.lang_short)}):</strong> ${esc(errMsg)}`, 'is-error');
+                                        setScatRunning(false);
+                                        refreshScatStats();
+                                        return;
+                                    }
+
+                                    const d = batchResp.data;
+                                    if (Array.isArray(d.new_hashes)) {
+                                        d.new_hashes.forEach(function(h) {
+                                            processedHashes.add(String(h));
+                                        });
+                                    }
+
+                                    const uCount = parseInt(d.translated_unique, 10) || 0;
+                                    const rCount = parseInt(d.updated_rows, 10) || 0;
+                                    const sCount = parseInt(d.saved_requests, 10) || 0;
+                                    const emptyCount = parseInt(d.skipped_empty, 10) || 0;
+
+                                    totalUniqueDone += uCount;
+                                    totalUpdatedRows += rCount;
+                                    totalSavedRequests += sCount;
+                                    currentTaskDone = parseInt(d.subjob_done_rows, 10) || currentTaskDone;
+
+                                    if (uCount > 0 || emptyCount > 0) {
+                                        let samplesHtml = '';
+                                        if (Array.isArray(d.samples) && d.samples.length > 0) {
+                                            const items = d.samples.map(function(s) {
+                                                const skuTag = s.sku ? `[${esc(s.sku)}] ` : '';
+                                                return `<div><code>${skuTag}${esc(s.src)}</code> &rarr; <em>${esc(s.dst)}</em> <span style="color:#646970;">(&times;${esc(s.matches)})</span></div>`;
+                                            }).join('');
+                                            samplesHtml = `<div class="plu-log-note">${items}</div>`;
+                                        }
+
+                                        const emptyNote = emptyCount > 0 ? ` | пропущено пустых: ${esc(emptyCount)}` : '';
+                                        appendScatLog(
+                                            `<div><strong>&#9989; Шаг #${esc(stepNo)} [${esc(task.lang_short)} &bull; ${esc(task.src_col)}&rarr;${esc(task.dst_col)}]:</strong> ` +
+                                            `переведено <strong>${esc(uCount)}</strong> уник. &rarr; обновлено <strong>${esc(rCount)}</strong> строк ` +
+                                            `<span style="color:#1a7a28;">(экономия: ${esc(sCount)} дублей)</span> ` +
+                                            `<span style="color:#646970;">(${esc(d.provider_label)}, ${esc(d.time_sec)} с${emptyNote})</span></div>${samplesHtml}`,
+                                            'is-success'
+                                        );
+                                    }
+
+                                    if (d.finished) {
+                                        completedPrevRows += (parseInt(task.total_rows, 10) || 0);
+                                        currentTaskDone = 0;
+                                        taskIdx++;
+                                        tableIndex = 0;
+                                        lastId = 0;
+                                        processedHashes = new Set();
+                                    } else {
+                                        tableIndex = parseInt(d.next_table_index, 10) || 0;
+                                        lastId = parseInt(d.next_last_id, 10) || 0;
+                                    }
+
+                                    updateScatProgress(
+                                        completedPrevRows + currentTaskDone,
+                                        grandTotalRows,
+                                        `⏳ Обработка: ${taskLabel}…`,
+                                        totalUniqueDone,
+                                        totalUpdatedRows,
+                                        totalSavedRequests
+                                    );
+
+                                    runNextBatch();
+                                },
+                                error: function(xhr, status, error) {
+                                    const serverMsg = (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message)
+                                        ? xhr.responseJSON.data.message
+                                        : '';
+                                    const displayErr = serverMsg
+                                        ? `${esc(serverMsg)} (HTTP ${esc(xhr.status || 500)})`
+                                        : `Сетевая ошибка (${esc(error || status)}, HTTP ${esc(xhr.status || 500)})`;
+                                    appendScatLog(`&#10060; <strong>Шаг #${esc(stepNo)}:</strong> ${displayErr}`, 'is-error');
+                                    setScatRunning(false);
+                                    refreshScatStats();
+                                }
+                            });
+                        };
+
+                        runNextBatch();
+                    },
+                    error: function(xhr, status, error) {
+                        const displayErr = `Сетевая ошибка планирования (${esc(error || status)}, HTTP ${esc(xhr.status || 500)})`;
+                        appendScatLog(`&#10060; ${displayErr}`, 'is-error');
+                        setScatRunning(false);
+                    }
+                });
+            });
+        }
     });
 })(jQuery);
+

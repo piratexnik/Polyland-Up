@@ -6,6 +6,7 @@ namespace PolylangUp\Core;
 use PolylangUp\Modules\MenuDuplicator;
 use PolylangUp\Modules\MetaboxUI;
 use PolylangUp\Modules\SameSlug;
+use PolylangUp\Modules\ScatCatalogTranslator;
 
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
@@ -29,6 +30,7 @@ final class Init {
             Updater::init();
             MetaboxUI::init();
             MenuDuplicator::init();
+            ScatCatalogTranslator::init();
         }
 
         // Модуль одинаковых слагов работает как в админке, так и на фронтенде

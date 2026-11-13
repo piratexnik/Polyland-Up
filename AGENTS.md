@@ -18,6 +18,7 @@
   - `includes/Modules/TranslatorAPI.php` — Шлюз Google Translate GTX и Gemini API.
   - `includes/Modules/LinkRewriter.php` — Умная перелинковка внутренних ссылок.
   - `includes/Modules/MenuDuplicator.php` — Модуль дублирования и перевода меню WordPress / Polylang.
+  - `includes/Modules/ScatCatalogTranslator.php` — Массовый переводчик БД каталога SCaT (`jos_tovar_*`) с дедупликацией уникальных текстов.
 - `assets/js/admin.js`, `assets/css/admin.css` — Ассеты админки.
 - `DOCS.md` — Технический паспорт проекта и архитектурная документация.
 
