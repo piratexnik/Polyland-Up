@@ -7,18 +7,17 @@
 - При внесении правок изменяй исключительно затронутые методы и блоки кода.
 
 ## 2. Карта файлов (File Map)
-- `Polyland-Up.php` — Точка входа в плагин, определение констант, PSR-4 автозагрузчик, хелпер `plu_get_option()`.
+- `Polyland-Up.php` — Точка входа в плагин, определение констант, PSR-4 автозагрузчик, хелпер `plu_get_option()` и публичный PHP API-мост (`plu_is_translator_ready()`, `plu_translate_dictionary()`, `plu_get_translator_last_stats()`).
 - `includes/Core/Init.php` — Инициализация ядра и компонентов (`PolylangUp\Core\Init`).
 - `includes/Core/Updater.php` — Автономная система обновлений с GitHub `piratexnik/Polyland-Up` (`PolylangUp\Core\Updater`).
 - `includes/Core/Settings.php` — Страница настроек и AJAX-тест подключения к API перевода (`PolylangUp\Core\Settings`).
-- *(Будущие модули Этапов 2-6)*:
+- *(Модули)*:
   - `includes/Modules/SameSlug.php` — Модуль одинаковых URL-слагов.
   - `includes/Modules/MetaboxUI.php` — Метабокс редактора и клонирование записи.
   - `includes/Modules/DiviParser.php` — Парсер блоков Divi 5 / шорткодов / Rank Math.
   - `includes/Modules/TranslatorAPI.php` — Шлюз Google Translate GTX и Gemini API.
   - `includes/Modules/LinkRewriter.php` — Умная перелинковка внутренних ссылок.
   - `includes/Modules/MenuDuplicator.php` — Модуль дублирования и перевода меню WordPress / Polylang.
-  - `includes/Modules/ScatCatalogTranslator.php` — Массовый переводчик БД каталога SCaT (`jos_tovar_*`) с дедупликацией уникальных текстов.
 - `assets/js/admin.js`, `assets/css/admin.css` — Ассеты админки.
 - `DOCS.md` — Технический паспорт проекта и архитектурная документация.
 

@@ -33,18 +33,28 @@ final class TranslatorAPI {
     /**
      * Единая точка входа для перевода словаря строк.
      *
-     * @param array<string, string> $dictionary  Ассоциативный массив вида ['k_0' => 'Текст...'].
-     * @param string                $source_lang Код исходного языка Polylang.
-     * @param string                $target_lang Код целевого языка Polylang.
-     * @param string                $engine      Движок перевода ('gtx' или 'gemini').
+     * @param array<string, string> $dictionary           Ассоциативный массив вида ['k_0' => 'Текст...'].
+     * @param string                $source_lang          Код исходного языка Polylang.
+     * @param string                $target_lang          Код целевого языка Polylang.
+     * @param string                $engine               Движок перевода ('gtx', 'gemini' или '' для настройки по умолчанию).
+     * @param string                $custom_system_prompt Дополнительная системная инструкция / глоссарий для Gemini AI.
      * @return array<string, string>|\WP_Error Переведенный словарь с теми же ключами или WP_Error.
      */
     public static function translate(
         array $dictionary,
         string $source_lang,
         string $target_lang,
-        string $engine = 'gtx'
+        string $engine = '',
+        string $custom_system_prompt = ''
     ): array|\WP_Error {
+        $engine = strtolower( trim( $engine ) );
+        if ( '' === $engine ) {
+            $engine = strtolower( trim( (string) plu_get_option( 'default_translator', 'gtx' ) ) );
+        }
+        if ( ! in_array( $engine, [ 'gtx', 'gemini' ], true ) ) {
+            $engine = 'gtx';
+        }
+
         self::$last_stats = [
             'engine'           => $engine,
             'provider_label'   => 'gemini' === $engine ? 'Google Gemini AI' : 'Google GTX',
@@ -52,6 +62,7 @@ final class TranslatorAPI {
             'total_count'      => count( $dictionary ),
             'time_ms'          => 0,
             'time_sec'         => 0.0,
+            'error'            => '',
         ];
 
         if ( empty( $dictionary ) ) {
@@ -64,7 +75,7 @@ final class TranslatorAPI {
         $start = microtime( true );
 
         if ( 'gemini' === $engine ) {
-            $result = self::translate_via_gemini( $dictionary, $sl, $tl );
+            $result = self::translate_via_gemini( $dictionary, $sl, $tl, $custom_system_prompt );
         } else {
             $result = self::translate_via_gtx( $dictionary, $sl, $tl );
         }
@@ -76,6 +87,7 @@ final class TranslatorAPI {
         self::$last_stats['time_sec'] = $elapsed_sec;
 
         if ( is_wp_error( $result ) ) {
+            self::$last_stats['error'] = $result->get_error_message();
             return $result;
         }
 
@@ -389,12 +401,18 @@ final class TranslatorAPI {
     /**
      * Провайдер 2: Нейросетевой пакетный перевод через Google Gemini API (чанки по 90 элементов).
      *
-     * @param array<string, string> $dictionary Словарь исходных строк.
-     * @param string                $sl         Нормализованный код исходного языка.
-     * @param string                $tl         Нормализованный код целевого языка.
+     * @param array<string, string> $dictionary           Словарь исходных строк.
+     * @param string                $sl                   Нормализованный код исходного языка.
+     * @param string                $tl                   Нормализованный код целевого языка.
+     * @param string                $custom_system_prompt Дополнительная системная инструкция / глоссарий для Gemini AI.
      * @return array<string, string>|\WP_Error
      */
-    public static function translate_via_gemini( array $dictionary, string $sl, string $tl ): array|\WP_Error {
+    public static function translate_via_gemini(
+        array $dictionary,
+        string $sl,
+        string $tl,
+        string $custom_system_prompt = ''
+    ): array|\WP_Error {
         $api_key = trim( (string) plu_get_option( 'gemini_api_key', '' ) );
         if ( '' === $api_key ) {
             return new \WP_Error(
@@ -411,14 +429,19 @@ final class TranslatorAPI {
 
         self::$last_stats['provider_label'] = 'Gemini ' . $model;
 
-        $user_prompt = trim( (string) plu_get_option( 'system_prompt', '' ) );
-        $tech_prompt = sprintf(
+        $user_prompt   = trim( (string) plu_get_option( 'system_prompt', '' ) );
+        $custom_prompt = trim( $custom_system_prompt );
+        $tech_prompt   = sprintf(
             'Translate all values of the provided JSON object from language "%1$s" to language "%2$s". Return strictly a valid JSON object with the EXACT same keys ("k_0", "k_1", etc.). Keep all HTML tags, attributes (except translatable alt/title), URLs, and Rank Math variables (%%sep%%, %%sitename%%, %%title%%) untouched.',
             $sl,
             $tl
         );
 
-        $full_system_instruction = '' !== $user_prompt ? ( $user_prompt . "\n\n" . $tech_prompt ) : $tech_prompt;
+        $prompt_parts = array_filter(
+            [ $user_prompt, $custom_prompt, $tech_prompt ],
+            static fn( string $part ): bool => '' !== $part
+        );
+        $full_system_instruction = implode( "\n\n", $prompt_parts );
 
         $endpoint            = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( $model ) . ':generateContent';
         $chunks              = array_chunk( $dictionary, 90, true );
@@ -447,7 +470,7 @@ final class TranslatorAPI {
                     [
                         'role'  => 'user',
                         'parts' => [
-                            [ 'text' => (string) wp_json_encode( $chunk, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) ],
+                            [ 'text' => (string) wp_json_encode( (object) $chunk, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) ],
                         ],
                     ],
                 ],

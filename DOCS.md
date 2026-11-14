@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `2.4`
+- **Текущая версия:** `2.5`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -19,7 +19,7 @@
 Polyland-Up/
 ├── AGENTS.md                 # Строгие правила разработки и протокол релизов
 ├── DOCS.md                   # Технический паспорт проекта
-├── Polyland-Up.php           # Точка входа, константы, автозагрузчик, plu_get_option()
+├── Polyland-Up.php           # Точка входа, константы, автозагрузчик, plu_get_option(), публичный API-мост
 ├── assets/
 │   ├── css/
 │   │   └── admin.css         # Стили статусов, бейджей, метабокса и лога перевода
@@ -36,12 +36,11 @@ Polyland-Up/
         ├── DiviParser.php    # Рекурсивный парсер блоков Divi 5, шорткодов и Rank Math (Этап 4)
         ├── TranslatorAPI.php # Шлюз Google Translate GTX и Gemini API (Этап 5)
         ├── LinkRewriter.php  # Умная перелинковка внутренних ссылок (Этап 6)
-        ├── MenuDuplicator.php # AI Дубликатор и Переводчик Меню WordPress / Polylang
-        └── ScatCatalogTranslator.php # Массовый переводчик БД каталога SCaT с дедупликацией
+        └── MenuDuplicator.php # AI Дубликатор и Переводчик Меню WordPress / Polylang
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '2.4'
+- `PLU_VERSION` — '2.5'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -63,7 +62,7 @@ plu_get_option( string $key, mixed $default = '' ): mixed
 | `default_translator` | string | `'gtx'` | Движок перевода по умолчанию: `gtx` (Google Translate Free) или `gemini` (Google AI Studio). |
 | `gemini_api_key` | string | `''` | API-ключ Gemini от Google AI Studio. |
 | `gemini_model` | string | `'gemini-2.5-flash'` | Рабочая модель Gemini (`gemini-3.8-flash`, `gemini-2.5-flash`, `gemini-2.5-pro` или кастомная). |
-| `system_prompt` | string | *(SEO промпт)* | Системный промпт и глоссарий для качественного сохранения HTML, шорткодов Divi 5 и переменных Rank Math. |
+| `system_prompt` | string | *(SEO промпт)* | Универсальный системный промпт для сохранения HTML, блоков/шорткодов Divi 5 и лимитов Rank Math SEO (60/160 символов). |
 | `github_token` | string | `''` | GitHub Personal Access Token для авторизации запросов к приватным репозиториям. |
 
 ---
@@ -157,7 +156,7 @@ plu_get_option( string $key, mixed $default = '' ): mixed
 ---
 
 ## 9. Шлюз пакетного перевода (`TranslatorAPI.php`)
-Принимает ассоциативный словарь `['k_0' => '...']`, исходный/целевой язык Polylang и движок (`gtx` или `gemini`), возвращая переведенный словарь и собирая метрики (`get_last_stats()`):
+Принимает ассоциативный словарь `['k_0' => '...']`, исходный/целевой язык, движок (`gtx`, `gemini` или `''` — из настройки `default_translator`) и необязательный `$custom_system_prompt`, возвращая переведенный словарь и собирая метрики (`get_last_stats()` — включая `provider_label`, `translated_count`, `time_sec`, `error`):
 1. **Нормализация кодов языков (`normalize_lang_code`):**
    - Преобразует нестандартные слаги Polylang (`ua` -> `uk`, `jp` -> `ja`, `cz` -> `cs`, `zh-cn` -> `zh-CN` и др.) и при необходимости уточняет 2-буквенный код из локали Polylang (`PLL()->model->get_language()`).
 2. **Провайдер 1 — Google GTX (`translate_via_gtx`):**
@@ -165,7 +164,8 @@ plu_get_option( string $key, mixed $default = '' ): mixed
    - Упаковывает строки в батчи до ~2200 символов (до 25 элементов) через разделитель `\n[[[PLU_SEP_99]]]\n` для пакетных Google-каналов (`clients5` -> `gtx`).
    - При несовпадении сегментов или сбое переходит на поштучный 3-ступенчатый фоллбэк `Settings::translate_free_cascade()` (`clients5` -> `gtx` -> `mymemory`).
 3. **Провайдер 2 — Google Gemini AI (`translate_via_gemini`):**
-   - Разбивает словарь на чанки по 40 элементов и отправляет POST в `v1beta/models/{model}:generateContent` (`responseMimeType: application/json`, `temperature: 0.2`, таймаут 60 сек) с пользовательским `system_prompt` и инструкцией сохранения ключей/тегов/Rank Math переменных.
+   - Разбивает словарь на чанки по 90 элементов и отправляет POST в `v1beta/models/{model}:generateContent` (`responseMimeType: application/json`, `temperature: 0.1`, таймаут 90 сек, `thinkingBudget: 0` для `flash`/`hydrogen`).
+   - Объединяет общий `system_prompt` из настроек, переданный `$custom_system_prompt` (если задан) и строгую JSON-инструкцию сохранения ключей/тегов/переменных Rank Math.
    - Повторяет запрос при HTTP 429/503, очищает возможные markdown-обертки ` ```json ` и сохраняет оригиналы при сбое отдельного ключа.
 
 ---
@@ -186,18 +186,43 @@ plu_get_option( string $key, mixed $default = '' ): mixed
 
 ---
 
-## 11. Массовый переводчик БД Каталога SCaT (`ScatCatalogTranslator.php`)
-Доступен на отдельной вкладке настроек **«📦 Каталог SCaT (БД)»** (`admin.php?page=polylang-up&tab=scat_catalog`) и работает с 4 кастомными таблицами (без `$wpdb->prefix`): `jos_tovar_lotki`, `jos_tovar_aksessuari`, `jos_tovar_krepleniya`, `jos_tovar_metizy` (колонки `Id`, `Sku`, `Name`/`Descr` для `ru`, `Name3`/`Descr3` для `uk`, `Name2`/`Descr2` для `en`). При отсутствии всех 4 таблиц в БД выводит информационное сообщение со списком ожидаемых таблиц.
-1. **Живой дашборд статистики (`wp_ajax_plu_scat_stats`):**
-   - Подсчитывает по каждой таблице и в строке «ИТОГО» общее количество позиций, заполненность названий (`Name`/`Name3`/`Name2`), описаний (`Descr`/`Descr3`/`Descr2`) и количество уникальных непустых описаний (`COUNT(DISTINCT ...)` + глобальный `UNION` для «ИТОГО»).
-2. **Пакетный конвейер с дедупликацией (`wp_ajax_plu_scat_translate_batch`):**
-   - Поддерживает 2 фазы: `plan` (построение очереди подзадач `target_lang × field_type`) и `run` (выполнение батчей по 20/35/50 уникальных текстов).
-   - Группирует одинаковые тексты по `md5`, отправляя в `TranslatorAPI::translate()` каждый уникальный текст только один раз и обновляя через `$wpdb->prepare()` все совпадающие строки во всех выбранных таблицах (с резервным обновлением по `Id IN (...)`).
-   - Защита от бесконечного цикла: монотонный курсор (`table_index`, `last_id`) + передача `processed_hashes` гарантируют, что пустые ответы или режим `overwrite_all` не запрашивают один и тот же текст повторно.
-   - Клиент (`admin.js`) автоматически отключает чекбокс исходного языка в списке целевых языков, отображает прогресс-бар (`0%..100%`), счетчики экономии дедупликации, подробный лог и кнопку остановки «⏸ Остановить».
-3. **Инженерный глоссарий SCaT (`Settings::get_default('system_prompt')`):**
-   - Закрепляет отраслевую украинскую терминологию SCaT (*«лоток драбинного типу» / «драбинний лоток»*, *«оцинкований за методом Сендзіміра»*, *«металорукав»*) и требование сохранности артикулов, серий и габаритных размеров.
-4. **Резервное копирование и экспорт таблиц (перехват `admin_init` priority 1, параметр `plu_scat_export=sql|csv`, Nonce `plu_scat_export_nonce`, права `manage_options`):**
-   - Безопасная потоковая буферизация во временный поток `php://temp`, очистка буферов вывода (`ob_end_clean()`) и защита через `try / catch ( \Throwable )` с выводом ошибки через `wp_die()`.
-   - `plu_scat_export=sql`: генерация `scat-catalog-backup-{Y-m-d_H-i}.sql` (`DROP TABLE IF EXISTS`, `SHOW CREATE TABLE`, пакетный `INSERT INTO` с экранированием через `$wpdb->_real_escape()` + `remove_placeholder_escape()` без прямого обращения к защищенному `$wpdb->dbh`, а также HEX-формат для бинарных/не-UTF8 значений).
-   - `plu_scat_export=csv`: генерация `scat-catalog-{Y-m-d_H-i}.csv` с обязательным UTF-8 BOM (`\xEF\xBB\xBF`), разделителем `;`, явным 5-м аргументом `$escape = '\\'` в `fputcsv()` и колонками `Table`, `Id`, `Sku`, `Name (RU)`, `Name3 (UA)`, `Name2 (EN)`, `Descr (RU)`, `Descr3 (UA)`, `Descr2 (EN)`.
+## 11. Публичный PHP API для интеграции со сторонними плагинами
+Профильные плагины (например, `SCaT Calculator` для перевода кастомных таблиц каталога и др.) могут использовать единый шлюз перевода `Polyland-Up` через три глобальные функции-хелпера, объявленные в `Polyland-Up.php`:
+
+1. **`plu_is_translator_ready(): bool`**
+   - Возвращает `true`, если плагин `Polyland-Up` активен и его классы (`Settings`, `TranslatorAPI`) готовы к обработке запросов.
+   - Рекомендуется проверять перед вызовом через `function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready()`.
+
+2. **`plu_translate_dictionary( array $dictionary, string $source_lang, string $target_lang, string $engine = '', string $custom_prompt = '' ): array`**
+   - Вызывает `PolylangUp\Modules\TranslatorAPI::translate()` и возвращает переведенный ассоциативный массив `['key' => 'translated_value']` с сохранением исходных ключей.
+   - Параметр `$engine`: `'gtx'`, `'gemini'` или `''` (по умолчанию берется движок из настройки `default_translator` плагина `Polylang AI`).
+   - Параметр `$custom_prompt`: необязательная доменная инструкция или отраслевой глоссарий, который добавляется к базовому `system_prompt` при работе через Google Gemini AI.
+   - При критической ошибке API (например, отсутствует ключ Gemini или произошел сетевой/HTTP сбой) возвращает пустой массив `[]`, а текст ошибки сохраняется в статистике (`plu_get_translator_last_stats()['error']`).
+
+3. **`plu_get_translator_last_stats(): array`**
+   - Возвращает статистику последнего выполненного запроса на перевод из `PolylangUp\Modules\TranslatorAPI::get_last_stats()`:
+     - `engine` (`string`) — фактически использованный движок (`gtx` / `gemini`);
+     - `provider_label` (`string`) — название провайдера/канала или модели (например, `'Google GTX / clients5'` или `'Gemini gemini-2.5-flash'`);
+     - `translated_count` (`int`) — количество переведенных ключей;
+     - `total_count` (`int`) — общее количество ключей во входном словаре;
+     - `time_ms` (`int`) / `time_sec` (`float`) — длительность выполнения;
+     - `error` (`string`) — текст ошибки при сбое или пустая строка `''` при успехе.
+
+### Пример интеграции в стороннем плагине
+```php
+if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() ) {
+    $glossary = "ТЕХНИЧЕСКИЙ ГЛОССАРИЙ:\n...";
+    $translated = plu_translate_dictionary(
+        [ 'k_0' => 'Текст 1', 'k_1' => 'Текст 2' ],
+        'ru',
+        'uk',
+        'gemini',
+        $glossary
+    );
+    $stats = plu_get_translator_last_stats();
+
+    if ( ! empty( $stats['error'] ) ) {
+        // Обработка ошибки: $stats['error']
+    }
+}
+```

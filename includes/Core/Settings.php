@@ -28,7 +28,7 @@ final class Settings {
             'default_translator' => 'gtx',
             'gemini_api_key'     => '',
             'gemini_model'       => 'gemini-2.5-flash',
-            'system_prompt'      => "Ты — профессиональный технический SEO-локализатор для корпоративного сайта. Переводи тексты точно по смыслу, сохраняя деловой и экспертный тон.\n\nСТРОГИЕ ПРАВИЛА:\n1) Сохраняй все HTML-теги, шорткоды и переменные Rank Math (%sep%, %sitename%, %title%) без изменений.\n2) При переводе на английский (EN) или другие латинские языки полностью исключай остаточную кириллицу как в видимом тексте, так и в атрибутах alt/title.\n3) Правила для ключей Rank Math SEO:\n- Для ключа __meta__rank_math_title (SEO Title): емкий коммерческий перевод длиной до 55–60 символов (без учета переменных %sep% %sitename%).\n- Для ключа __meta__rank_math_description (Meta Description): привлекательный SEO-перевод длиной до 150–160 символов.\n- Для ключа __meta__rank_math_focus_keyword: точный высокочастотный поисковый ключ на целевом языке.\n4) Соблюдай терминологию из глоссария ниже.\n\nТЕХНИЧЕСКИЙ ГЛОССАРИЙ SCaT:\nПри переводе электротехнической продукции ТМ SCaT на украинский язык (UK): \"лестничный лоток\" или \"лестничного типа\" ВСЕГДА переводи как \"лоток драбинного типу\" / \"драбинний лоток\" (НЕ \"сходовий\"); \"оцинкованный по методу Сендзимира\" -> \"оцинкований за методом Сендзіміра\"; \"металлорукав\" -> \"металорукав\"; сохраняй все артикулы, маркировки серий и габаритные размеры (мм, х, Ø) без искажений.",
+            'system_prompt'      => "Ты — профессиональный технический SEO-локализатор для веб-сайтов на WordPress и Divi 5. Переводи тексты точно по смыслу, сохраняя деловой, естественный и экспертный тон целевого языка.\n\nСТРОГИЕ ПРАВИЛА:\n1) Сохраняй все HTML-теги, шорткоды, блоки и параметры Divi 5, URL-адреса, артикулы, числовые значения и переменные Rank Math (%sep%, %sitename%, %title% и др.) без изменений.\n2) При переводе на английский (EN) или другие языки на латинице полностью исключай остаточную кириллицу как в видимом тексте, так и в переводимых атрибутах (alt, title, aria-label, placeholder).\n3) Правила для ключей Rank Math SEO:\n- Для ключа __meta__rank_math_title (SEO Title): емкий SEO-перевод длиной до 55–60 символов (без учета переменных %sep% %sitename%).\n- Для ключа __meta__rank_math_description (Meta Description): привлекательный SEO-перевод длиной до 150–160 символов.\n- Для ключа __meta__rank_math_focus_keyword: точный релевантный поисковый ключ на целевом языке.",
             'github_token'       => '',
         ];
 
@@ -896,9 +896,8 @@ final class Settings {
 
         $active_tab = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'general';
         $tabs = [
-            'general'      => __( 'Основные', 'polyland-up' ),
-            'menus'        => __( '🍔 Дубликатор Меню', 'polyland-up' ),
-            'scat_catalog' => __( '📦 Каталог SCaT (БД)', 'polyland-up' ),
+            'general' => __( 'Основные', 'polyland-up' ),
+            'menus'   => __( '🍔 Дубликатор Меню', 'polyland-up' ),
         ];
         if ( ! array_key_exists( $active_tab, $tabs ) ) {
             $active_tab = 'general';
@@ -976,8 +975,6 @@ final class Settings {
                     </form>
                 <?php elseif ( 'menus' === $active_tab ) : ?>
                     <?php \PolylangUp\Modules\MenuDuplicator::render_tab_content(); ?>
-                <?php elseif ( 'scat_catalog' === $active_tab ) : ?>
-                    <?php \PolylangUp\Modules\ScatCatalogTranslator::render_tab_content(); ?>
                 <?php endif; ?>
             </div>
         </div>
