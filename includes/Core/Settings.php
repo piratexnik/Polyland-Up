@@ -784,6 +784,19 @@ final class Settings {
 
         $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( $clean_model ) . ':generateContent';
 
+        $use_thinking_config = ( stripos( $clean_model, 'flash' ) !== false || stripos( $clean_model, 'hydrogen' ) !== false );
+
+        $generation_config = [
+            'response_mime_type' => 'application/json',
+            'temperature'        => 0.1,
+        ];
+
+        if ( $use_thinking_config ) {
+            $generation_config['thinkingConfig'] = [
+                'thinkingBudget' => 0,
+            ];
+        }
+
         $payload = [
             'contents' => [
                 [
@@ -794,21 +807,35 @@ final class Settings {
                     ],
                 ],
             ],
-            'generationConfig' => [
-                'response_mime_type' => 'application/json',
-                'temperature'        => 0.1,
-            ],
+            'generationConfig' => $generation_config,
         ];
 
-        $start = microtime( true );
-        $response = wp_remote_post( $url, [
-            'timeout' => 15,
+        $request_args = [
+            'timeout' => 45,
             'headers' => [
                 'Content-Type'   => 'application/json',
                 'x-goog-api-key' => $api_key,
             ],
             'body'    => wp_json_encode( $payload ),
-        ] );
+        ];
+
+        $start    = microtime( true );
+        $response = wp_remote_post( $url, $request_args );
+
+        // Страховка: если модель не поддерживает thinkingConfig (HTTP 400), повторяем без него
+        if (
+            $use_thinking_config &&
+            ! is_wp_error( $response ) &&
+            400 === (int) wp_remote_retrieve_response_code( $response )
+        ) {
+            $err_body = (string) wp_remote_retrieve_body( $response );
+            if ( stripos( $err_body, 'thinkingConfig' ) !== false || stripos( $err_body, 'thinking' ) !== false ) {
+                unset( $payload['generationConfig']['thinkingConfig'] );
+                $request_args['body'] = wp_json_encode( $payload );
+                $response             = wp_remote_post( $url, $request_args );
+            }
+        }
+
         $elapsed = (int) round( ( microtime( true ) - $start ) * 1000 );
 
         if ( is_wp_error( $response ) ) {

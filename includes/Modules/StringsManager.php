@@ -16,10 +16,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class StringsManager {
 
-	public const OPTION_NAME      = 'plu_ui_strings';
-	public const REF_POST_OPTION  = 'plu_ui_strings_ref_post_id';
-	public const PLL_GROUP        = 'Polylang AI UI';
-	public const META_PREFIX      = 'plu_str_';
+	public const OPTION_NAME = 'plu_ui_strings';
+	public const PLL_GROUP   = 'Polylang AI UI';
+	public const META_PREFIX = 'plu_str_';
 
 	/**
 	 * Статический кеш словаря UI-строк в RAM.
@@ -27,11 +26,6 @@ final class StringsManager {
 	 * @var array<string, array<string, string>>|null
 	 */
 	private static ?array $strings_cache = null;
-
-	/**
-	 * Флаг временного отключения перехвата get_post_metadata при синхронизации эталонного поста.
-	 */
-	private static bool $bypass_meta_filter = false;
 
 	/**
 	 * Инициализация хуков модуля (фронтенд + админка).
@@ -44,15 +38,13 @@ final class StringsManager {
 		add_shortcode( 'plu_str', [ self::class, 'render_shortcode_str' ] );
 		add_shortcode( 'plu_date', [ self::class, 'render_shortcode_date' ] );
 
-		// Гарантированное раскрытие шорткодов внутри модулей и блоков Divi 5
+		// Гарантированное раскрытие шорткодов и нераскрытых $variable(...plu_str_...)$ на архивах в Divi 5
 		add_filter( 'et_pb_module_content', [ self::class, 'process_divi_shortcodes' ], 20 );
 		add_filter( 'et_module_shortcode_output', [ self::class, 'process_divi_shortcodes' ], 20 );
-		add_filter( 'render_block', [ self::class, 'process_divi_shortcodes' ], 20 );
+		add_filter( 'render_block', [ self::class, 'process_divi_block_output' ], 12, 2 );
 
-		// Виртуальные мета-ключи plu_str_{id} для Dynamic Content (бочонок) в Divi 5
+		// Виртуальные мета-ключи plu_str_{id} для Dynamic Content (бочонок) в Divi 5 (в т.ч. при $object_id = 0)
 		add_filter( 'get_post_metadata', [ self::class, 'filter_virtual_post_metadata' ], 10, 4 );
-		add_filter( 'postmeta_form_keys', [ self::class, 'filter_postmeta_form_keys' ], 10, 2 );
-		add_filter( 'et_builder_custom_fields', [ self::class, 'filter_divi_custom_fields' ], 10 );
 
 		// Сброс статического кеша при обновлении опции
 		add_action( 'update_option_' . self::OPTION_NAME, [ self::class, 'reset_cache' ] );
@@ -178,11 +170,6 @@ final class StringsManager {
 			$defaults = self::get_default_presets();
 			update_option( self::OPTION_NAME, $defaults, true );
 			self::$strings_cache = $defaults;
-
-			// Синхронизируем эталонные ключи для Divi 5 при первой инициализации
-			if ( is_admin() ) {
-				self::sync_reference_post_meta( $defaults );
-			}
 
 			return self::$strings_cache;
 		}
@@ -422,9 +409,9 @@ final class StringsManager {
 	}
 
 	/**
-	 * Гарантированное раскрытие шорткодов [plu_str] и [plu_date] в модулях и блоках Divi 5.
+	 * Гарантированное раскрытие шорткодов [plu_str] и [plu_date] в модулях Divi.
 	 *
-	 * @param mixed $output HTML-вывод модуля/блока.
+	 * @param mixed $output HTML-вывод модуля.
 	 * @return mixed
 	 */
 	public static function process_divi_shortcodes( mixed $output ): mixed {
@@ -436,20 +423,57 @@ final class StringsManager {
 	}
 
 	/**
+	 * Обработка вывода блоков Divi 5 (фильтр render_block, приоритет 12):
+	 * 1) Раскрывает нераскрытые динамические плейсхолдеры $variable(...plu_str_...)$ на страницах Архивов / Категорий / Поиска (где post_id = 0 или null).
+	 * 2) Раскрывает шорткоды [plu_str ...] и [plu_date ...], если они не были обработаны ранее.
+	 *
+	 * @param mixed $block_content HTML-вывод блока.
+	 * @param mixed $block         Массив данных блока Gutenberg / Divi 5.
+	 * @return mixed
+	 */
+	public static function process_divi_block_output( mixed $block_content, mixed $block = [] ): mixed {
+		if ( ! is_string( $block_content ) || '' === $block_content ) {
+			return $block_content;
+		}
+
+		if ( str_contains( $block_content, '$variable(' ) && str_contains( $block_content, self::META_PREFIX ) ) {
+			$replaced = preg_replace_callback(
+				'/\$variable\((?:[^$]|\$(?!\)))*?plu_str_([a-z0-9_]+)(?:[^$]|\$(?!\)))*?\)\$/i',
+				static function ( array $matches ): string {
+					$str_id = self::sanitize_string_id( (string) $matches[1] );
+					if ( '' === $str_id ) {
+						return $matches[0];
+					}
+					$translated = self::get_string( $str_id );
+					return '' !== $translated ? esc_html( $translated ) : $matches[0];
+				},
+				$block_content
+			);
+
+			if ( is_string( $replaced ) ) {
+				$block_content = $replaced;
+			}
+		}
+
+		if ( str_contains( $block_content, '[plu_' ) ) {
+			$block_content = do_shortcode( $block_content );
+		}
+
+		return $block_content;
+	}
+
+	/**
 	 * Перехват get_post_metadata для виртуальных ключей plu_str_{id}.
-	 * На фронтенде отдает перевод мгновенно из статического кеша без запросов в wp_postmeta.
+	 * На фронтенде отдает перевод мгновенно из статического кеша без запросов в wp_postmeta,
+	 * независимо от переданного $object_id (включая 0/null на страницах архивов).
 	 *
 	 * @param mixed $value     Текущее значение фильтра (обычно null).
-	 * @param mixed $object_id ID записи.
+	 * @param mixed $object_id ID записи (может быть 0 на архивах).
 	 * @param mixed $meta_key  Имя мета-ключа.
 	 * @param mixed $single    Одиночное значение или массив.
 	 * @return mixed
 	 */
 	public static function filter_virtual_post_metadata( mixed $value, mixed $object_id, mixed $meta_key, mixed $single ): mixed {
-		if ( self::$bypass_meta_filter ) {
-			return $value;
-		}
-
 		if ( ! is_string( $meta_key ) || ! str_starts_with( $meta_key, self::META_PREFIX ) ) {
 			return $value;
 		}
@@ -462,118 +486,6 @@ final class StringsManager {
 		$translated = self::get_string( $str_id );
 
 		return $single ? $translated : [ $translated ];
-	}
-
-	/**
-	 * Инжекция виртуальных ключей plu_str_{id} в стандартный список мета-ключей WordPress (postmeta_form_keys).
-	 *
-	 * @param mixed $keys Массив существующих ключей.
-	 * @param mixed $post Текущий объект WP_Post.
-	 * @return mixed
-	 */
-	public static function filter_postmeta_form_keys( mixed $keys, mixed $post ): mixed {
-		if ( ! is_array( $keys ) ) {
-			$keys = [];
-		}
-
-		foreach ( array_keys( self::get_strings() ) as $str_id ) {
-			$meta_key = self::META_PREFIX . $str_id;
-			if ( ! in_array( $meta_key, $keys, true ) ) {
-				$keys[] = $meta_key;
-			}
-		}
-
-		return $keys;
-	}
-
-	/**
-	 * Инжекция виртуальных ключей plu_str_{id} в список кастомных полей конструктора Divi.
-	 *
-	 * @param mixed $fields Список полей.
-	 * @return mixed
-	 */
-	public static function filter_divi_custom_fields( mixed $fields ): mixed {
-		if ( ! is_array( $fields ) ) {
-			return $fields;
-		}
-
-		foreach ( array_keys( self::get_strings() ) as $str_id ) {
-			$meta_key = self::META_PREFIX . $str_id;
-			if ( ! array_key_exists( $meta_key, $fields ) ) {
-				$fields[ $meta_key ] = $meta_key;
-			}
-		}
-
-		return $fields;
-	}
-
-	/**
-	 * Синхронизация эталонных мета-ключей plu_str_{id} на одной главной/первой записи в БД,
-	 * чтобы SQL-запрос `SELECT DISTINCT meta_key FROM wp_postmeta` в Divi 5 видел все ключи
-	 * в выпадающем списке Dynamic Content -> Custom Field без засорения остальных постов.
-	 *
-	 * @param array<string, array<string, string>> $strings Словарь UI-строк.
-	 */
-	public static function sync_reference_post_meta( array $strings ): void {
-		global $wpdb;
-
-		if ( ! isset( $wpdb ) || ! ( $wpdb instanceof \wpdb ) ) {
-			return;
-		}
-
-		$ref_post_id = (int) get_option( self::REF_POST_OPTION, 0 );
-		if ( $ref_post_id > 0 ) {
-			$exists = $wpdb->get_var(
-				$wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID = %d LIMIT 1", $ref_post_id )
-			);
-			if ( ! $exists ) {
-				$ref_post_id = 0;
-			}
-		}
-
-		if ( $ref_post_id <= 0 ) {
-			$front_page_id = (int) get_option( 'page_on_front', 0 );
-			if ( $front_page_id > 0 ) {
-				$ref_post_id = $front_page_id;
-			} else {
-				$ref_post_id = (int) $wpdb->get_var(
-					"SELECT ID FROM {$wpdb->posts} WHERE post_type IN ('page', 'post') AND post_status IN ('publish', 'draft', 'private') ORDER BY ID ASC LIMIT 1"
-				);
-			}
-
-			if ( $ref_post_id > 0 ) {
-				update_option( self::REF_POST_OPTION, $ref_post_id, false );
-			}
-		}
-
-		if ( $ref_post_id <= 0 ) {
-			return;
-		}
-
-		self::$bypass_meta_filter = true;
-		try {
-			// Удаляем устаревшие эталонные ключи plu_str_* у опорного поста
-			$like_pattern = $wpdb->esc_like( self::META_PREFIX ) . '%';
-			$wpdb->query(
-				$wpdb->prepare(
-					"DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s",
-					$ref_post_id,
-					$like_pattern
-				)
-			);
-
-			// Записываем актуальные ключи (по 1 записи на ключ)
-			foreach ( array_keys( $strings ) as $str_id ) {
-				$clean_id = self::sanitize_string_id( (string) $str_id );
-				if ( '' !== $clean_id ) {
-					update_post_meta( $ref_post_id, self::META_PREFIX . $clean_id, $clean_id );
-				}
-			}
-
-			wp_cache_delete( $ref_post_id, 'post_meta' );
-		} finally {
-			self::$bypass_meta_filter = false;
-		}
 	}
 
 	/**
@@ -847,16 +759,13 @@ final class StringsManager {
 		update_option( self::OPTION_NAME, $clean_strings, true );
 		self::$strings_cache = $clean_strings;
 
-		// Синхронизируем 1 эталонную запись для выпадающего списка Divi 5 Dynamic Content
-		self::sync_reference_post_meta( $clean_strings );
-
 		// Обновляем регистрацию строк в Polylang
 		self::register_polylang_strings();
 
 		wp_send_json_success( [
 			'count'   => count( $clean_strings ),
 			'message' => sprintf(
-				__( 'Сохранено UI-строк: %d. Эталонные мета-ключи plu_str_* синхронизированы для Divi 5.', 'polyland-up' ),
+				__( 'Сохранено UI-строк: %d. Словарь обновлен и синхронизирован с Polylang.', 'polyland-up' ),
 				count( $clean_strings )
 			),
 		] );

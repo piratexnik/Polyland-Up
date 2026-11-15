@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `2.6`
+- **Текущая версия:** `2.7`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -41,7 +41,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '2.6'
+- `PLU_VERSION` — '2.7'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -237,8 +237,8 @@ if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() )
    - При первой инициализации предзаполняются 10 базовых ключей (`read_more`, `home`, `published_on`, `updated_on`, `all_news`, `back_to_list`, `search_placeholder`, `no_results`, `share`, `categories`).
    - Все строки синхронизируются с нативным реестром Polylang (`pll_register_string(..., 'Polylang AI UI')` на хуке `init`).
 2. **Три способа вывода:**
-   - Шорткод `[plu_str id="read_more" before="" after="" default=""]` (с гарантированным раскрытием через `render_block`, `et_pb_module_content`, `et_module_shortcode_output`).
-   - Виртуальные мета-ключи `plu_str_{id}` через фильтр `get_post_metadata` для `Dynamic Content -> Custom Field` в Divi 5. При сохранении в админке эталонные ключи синхронизируются только на 1 опорной записи (`plu_ui_strings_ref_post_id`), чтобы `SELECT DISTINCT meta_key FROM wp_postmeta` в Divi 5 видел все ключи без засорения остальных постов.
+   - Шорткод `[plu_str id="read_more" before="" after="" default=""]` (с гарантированным раскрытием через `render_block` с приоритетом 12, `et_pb_module_content`, `et_module_shortcode_output`).
+   - Виртуальные мета-ключи `plu_str_{id}` через фильтр `get_post_metadata` для `Dynamic Content -> Custom Field` в Divi 5 (работает независимо от `$object_id`, включая `0`/`null` на страницах Архивов / Категорий / Поиска, а также с фоллбэком в `render_block` для нераскрытых плейсхолдеров `$variable(...plu_str_...)$`).
    - Бонусный шорткод мультиязычной даты `[plu_date format="l, j F Y"]` через `wp_date()`.
 3. **Интерфейс админки (`admin.php?page=polylang-up&tab=strings`):**
    - Динамические колонки языков через `pll_languages_list(['fields' => ''])`.
