@@ -633,7 +633,7 @@ final class SameSlug {
         $expected_lang = ( is_object( $language ) && isset( $language->slug ) ) ? (string) $language->slug : '';
 
         if ( '' !== $expected_lang && $post_lang === $expected_lang ) {
-            $req_uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_parse_url( (string) $_SERVER['REQUEST_URI'], PHP_URL_PATH ) : '';
+            $req_uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_parse_url( wp_unslash( (string) $_SERVER['REQUEST_URI'] ), PHP_URL_PATH ) : '';
             $red_uri = (string) wp_parse_url( $redirect_url, PHP_URL_PATH );
 
             if ( '' !== $req_uri && rtrim( $req_uri, '/' ) === rtrim( $red_uri, '/' ) ) {

@@ -253,7 +253,7 @@ final class MetaboxUI {
     public static function ajax_duplicate_post(): void {
         check_ajax_referer( 'plu_clone_nonce', 'nonce' );
 
-        $source_post_id = isset( $_POST['post_id'] ) ? (int) $_POST['post_id'] : 0;
+        $source_post_id = isset( $_POST['post_id'] ) ? absint( wp_unslash( $_POST['post_id'] ) ) : 0;
         if ( $source_post_id <= 0 || ! current_user_can( 'edit_post', $source_post_id ) ) {
             wp_send_json_error( [
                 'message' => esc_html__( 'У вас недостаточно прав или указан некорректный ID записи.', 'polyland-up' ),
@@ -272,12 +272,12 @@ final class MetaboxUI {
             ignore_user_abort( true );
         }
 
-        $mode = sanitize_key( (string) ( $_POST['mode'] ?? 'clone_only' ) );
+        $mode = sanitize_key( wp_unslash( (string) ( $_POST['mode'] ?? 'clone_only' ) ) );
         if ( ! in_array( $mode, [ 'clone_only', 'translate_gtx', 'translate_gemini' ], true ) ) {
             $mode = 'clone_only';
         }
 
-        $target_status = sanitize_key( (string) ( $_POST['target_status'] ?? 'draft' ) );
+        $target_status = sanitize_key( wp_unslash( (string) ( $_POST['target_status'] ?? 'draft' ) ) );
         if ( ! in_array( $target_status, [ 'draft', 'publish' ], true ) ) {
             $target_status = 'draft';
         }
@@ -292,7 +292,7 @@ final class MetaboxUI {
 
         try {
             // Поддержка как одиночного target_lang (пошаговый AJAX из JS), так и массива target_langs
-            $single_lang = isset( $_POST['target_lang'] ) ? sanitize_key( (string) $_POST['target_lang'] ) : '';
+            $single_lang = isset( $_POST['target_lang'] ) ? sanitize_key( wp_unslash( (string) $_POST['target_lang'] ) ) : '';
             if ( '' !== $single_lang ) {
                 $result = self::duplicate_post_to_language( $source_post, $single_lang, $options );
                 if ( is_wp_error( $result ) ) {
@@ -304,7 +304,7 @@ final class MetaboxUI {
                 wp_send_json_success( $result );
             }
 
-            $raw_langs    = isset( $_POST['target_langs'] ) && is_array( $_POST['target_langs'] ) ? $_POST['target_langs'] : [];
+            $raw_langs    = isset( $_POST['target_langs'] ) && is_array( $_POST['target_langs'] ) ? wp_unslash( $_POST['target_langs'] ) : [];
             $target_langs = array_values( array_filter( array_map( 'sanitize_key', $raw_langs ) ) );
 
             if ( empty( $target_langs ) ) {
@@ -402,15 +402,16 @@ final class MetaboxUI {
         }
 
         // 3. Подготовка контента и точек расширения (Этапы 4–6)
-        $post_title          = $source_post->post_title;
-        $post_excerpt        = $source_post->post_excerpt;
-        $post_content        = $source_post->post_content;
-        $rank_math_meta      = [];
-        $translated_count    = 0;
-        $translation_stats   = [];
-        $translation_summary = '';
-        $mode                = (string) ( $options['mode'] ?? 'clone_only' );
-        $notes               = [];
+        $post_title            = $source_post->post_title;
+        $post_excerpt          = $source_post->post_excerpt;
+        $post_content          = $source_post->post_content;
+        $rank_math_meta        = [];
+        $translated_count      = 0;
+        $rewritten_links_count = 0;
+        $translation_stats     = [];
+        $translation_summary   = '';
+        $mode                  = (string) ( $options['mode'] ?? 'clone_only' );
+        $notes                 = [];
 
         $is_translation_mode = in_array( $mode, [ 'translate_gtx', 'translate_gemini' ], true );
         if ( $is_translation_mode ) {
@@ -463,7 +464,8 @@ final class MetaboxUI {
                 class_exists( \PolylangUp\Modules\LinkRewriter::class ) &&
                 method_exists( \PolylangUp\Modules\LinkRewriter::class, 'rewrite_content' )
             ) {
-                $post_content = \PolylangUp\Modules\LinkRewriter::rewrite_content( $post_content, $target_lang );
+                $post_content          = \PolylangUp\Modules\LinkRewriter::rewrite_content( $post_content, $target_lang );
+                $rewritten_links_count = \PolylangUp\Modules\LinkRewriter::get_last_rewritten_count();
             }
         }
 

@@ -237,10 +237,10 @@ final class MenuDuplicator {
             ignore_user_abort( true );
         }
 
-        $source_menu_id          = isset( $_POST['source_menu_id'] ) ? (int) $_POST['source_menu_id'] : 0;
-        $source_lang             = isset( $_POST['source_lang'] ) ? sanitize_key( (string) $_POST['source_lang'] ) : '';
-        $target_lang             = isset( $_POST['target_lang'] ) ? sanitize_key( (string) $_POST['target_lang'] ) : '';
-        $translate_mode          = isset( $_POST['translate_mode'] ) ? sanitize_key( (string) $_POST['translate_mode'] ) : 'gtx';
+        $source_menu_id          = isset( $_POST['source_menu_id'] ) ? absint( wp_unslash( $_POST['source_menu_id'] ) ) : 0;
+        $source_lang             = isset( $_POST['source_lang'] ) ? sanitize_key( wp_unslash( (string) $_POST['source_lang'] ) ) : '';
+        $target_lang             = isset( $_POST['target_lang'] ) ? sanitize_key( wp_unslash( (string) $_POST['target_lang'] ) ) : '';
+        $translate_mode          = isset( $_POST['translate_mode'] ) ? sanitize_key( wp_unslash( (string) $_POST['translate_mode'] ) ) : 'gtx';
         $translate_custom_labels = ! empty( $_POST['translate_custom_labels'] );
         $assign_locations        = ! empty( $_POST['assign_locations'] );
         $overwrite_menu          = ! empty( $_POST['overwrite_menu'] );
@@ -518,7 +518,7 @@ final class MenuDuplicator {
                     }
                     delete_post_meta( $new_item_id, (string) $meta_key );
                     foreach ( (array) $meta_values as $meta_val ) {
-                        add_post_meta( $new_item_id, (string) $meta_key, maybe_unserialize( $meta_val ) );
+                        add_post_meta( $new_item_id, (string) $meta_key, wp_slash( maybe_unserialize( $meta_val ) ) );
                     }
                 }
             }

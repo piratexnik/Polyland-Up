@@ -245,8 +245,8 @@ final class StringsManager {
 		// Фоллбэк: определение по первому сегменту URL (для нестандартных контекстов / Theme Builder)
 		$valid_slugs = self::get_polylang_slugs();
 		if ( ! empty( $valid_slugs ) && ! empty( $_SERVER['REQUEST_URI'] ) ) {
-			$request_path = (string) parse_url( wp_unslash( (string) $_SERVER['REQUEST_URI'] ), PHP_URL_PATH );
-			$home_path    = (string) parse_url( home_url( '/' ), PHP_URL_PATH );
+			$request_path = (string) wp_parse_url( wp_unslash( (string) $_SERVER['REQUEST_URI'] ), PHP_URL_PATH );
+			$home_path    = (string) wp_parse_url( home_url( '/' ), PHP_URL_PATH );
 			$relative     = trim( substr( $request_path, strlen( rtrim( $home_path, '/' ) ) ), '/' );
 			$segments     = '' !== $relative ? explode( '/', $relative ) : [];
 
@@ -357,10 +357,10 @@ final class StringsManager {
 	/**
 	 * Шорткод [plu_str id="read_more" before="" after="" default=""].
 	 *
-	 * @param array<string, string>|string $atts Атрибуты шорткода.
+	 * @param mixed $atts Атрибуты шорткода.
 	 * @return string
 	 */
-	public static function render_shortcode_str( array|string $atts ): string {
+	public static function render_shortcode_str( mixed $atts = [] ): string {
 		$atts = shortcode_atts(
 			[
 				'id'      => '',
@@ -388,10 +388,10 @@ final class StringsManager {
 	/**
 	 * Бонусный шорткод мультиязычной даты [plu_date format="l, j F Y"].
 	 *
-	 * @param array<string, string>|string $atts Атрибуты шорткода.
+	 * @param mixed $atts Атрибуты шорткода.
 	 * @return string
 	 */
-	public static function render_shortcode_date( array|string $atts ): string {
+	public static function render_shortcode_date( mixed $atts = [] ): string {
 		$atts = shortcode_atts(
 			[
 				'format' => 'l, j F Y',

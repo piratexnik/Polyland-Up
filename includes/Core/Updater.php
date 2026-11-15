@@ -379,7 +379,7 @@ final class Updater {
      * Обработка действия ручной проверки обновлений по кнопке.
      */
     public static function handle_force_check(): void {
-        if ( ! isset( $_GET['plu_action'] ) || 'force_check_update' !== $_GET['plu_action'] ) {
+        if ( ! isset( $_GET['plu_action'] ) || 'force_check_update' !== sanitize_key( wp_unslash( (string) $_GET['plu_action'] ) ) ) {
             return;
         }
 
@@ -433,9 +433,9 @@ final class Updater {
             return;
         }
 
-        $status     = sanitize_key( $_GET['plu_update_status'] );
-        $remote_ver = isset( $_GET['plu_remote_ver'] ) ? sanitize_text_field( wp_unslash( $_GET['plu_remote_ver'] ) ) : '';
-        $local_ver  = isset( $_GET['plu_local_ver'] ) ? sanitize_text_field( wp_unslash( $_GET['plu_local_ver'] ) ) : '';
+        $status     = sanitize_key( wp_unslash( (string) $_GET['plu_update_status'] ) );
+        $remote_ver = isset( $_GET['plu_remote_ver'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['plu_remote_ver'] ) ) : '';
+        $local_ver  = isset( $_GET['plu_local_ver'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['plu_local_ver'] ) ) : '';
 
         if ( 'latest' === $status ) {
             $version_display = $local_ver ?: self::get_local_version();

@@ -456,7 +456,7 @@ final class Settings {
             ] );
         }
 
-        $translator = sanitize_key( (string) ( $_POST['translator'] ?? 'gtx' ) );
+        $translator = sanitize_key( wp_unslash( (string) ( $_POST['translator'] ?? 'gtx' ) ) );
         $api_key    = sanitize_text_field( wp_unslash( (string) ( $_POST['api_key'] ?? '' ) ) );
         $model      = sanitize_text_field( wp_unslash( (string) ( $_POST['model'] ?? 'gemini-2.5-flash' ) ) );
 
@@ -921,7 +921,7 @@ final class Settings {
             wp_die( esc_html__( 'У вас недостаточно прав для доступа к этой странице.', 'polyland-up' ) );
         }
 
-        $active_tab = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'general';
+        $active_tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( (string) $_GET['tab'] ) ) : 'general';
         $tabs = [
             'general' => __( 'Основные', 'polyland-up' ),
             'menus'   => __( '🍔 Дубликатор Меню', 'polyland-up' ),

@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `2.7`
+- **Текущая версия:** `2.8`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -41,7 +41,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '2.7'
+- `PLU_VERSION` — '2.8'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -242,6 +242,19 @@ if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() )
    - Бонусный шорткод мультиязычной даты `[plu_date format="l, j F Y"]` через `wp_date()`.
 3. **Интерфейс админки (`admin.php?page=polylang-up&tab=strings`):**
    - Динамические колонки языков через `pll_languages_list(['fields' => ''])`.
-   - Кнопки быстрого копирования `[plu_str id="..."]` и `plu_str_...` в буфер обмена.
+- Кнопки быстрого копирования `[plu_str id="..."]` и `plu_str_...` в буфер обмена.
    - Пакетный авто-перевод пустых ячеек через `wp_ajax_plu_translate_ui_strings` (`TranslatorAPI::translate()`) и сохранение через `wp_ajax_plu_save_ui_strings`.
+
+---
+
+## 13. AI Дубликатор и Переводчик Меню (`MenuDuplicator.php`)
+Работает во вкладке настроек `admin.php?page=polylang-up&tab=menus` через AJAX-обработчик `wp_ajax_plu_duplicate_menu` (проверка Nonce `plu_admin_nonce` и прав `edit_theme_options` / `manage_options`):
+1. **Пакетный перевод пунктов меню:**
+   - Собирает названия, `attr_title` и `description` в единый словарь (исключая `#pll_switcher`) и переводит через `TranslatorAPI::translate()` (`gemini`, `gtx` или `none`).
+2. **Умная подмена объектов и ссылок:**
+   - Для пунктов `post_type` и `taxonomy` подставляет переведенные ID через `pll_get_post()` / `pll_get_term()`. Если перевод еще не создан — конвертирует пункт в `custom`-ссылку с перелинкованным URL через `LinkRewriter::rewrite_url()`.
+   - Сохраняет иерархию подменю (`_menu_item_menu_item_parent`), классы Divi, кастомные мета-поля (через `wp_slash()`) и переключатель языков `#pll_switcher`.
+3. **Авто-привязка к областям темы:**
+   - Находит области темы исходного меню (в `polylang['nav_menus']` и `get_nav_menu_locations()`) и автоматически регистрирует созданное меню для целевого языка в опции `polylang`.
+
 
