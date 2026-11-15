@@ -157,6 +157,31 @@
     color: #135e96;
 }
 
+.plu-swap-lang-box {
+    background: #fffbeb;
+    border: 1px solid #f59e0b;
+    border-radius: 4px;
+    padding: 8px 10px;
+}
+
+.plu-swap-lang-box .plu-option-checkbox {
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.plu-swap-actual-lang-body {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed #fcd34d;
+}
+
+.plu-swap-hint {
+    margin: 6px 0 0 !important;
+    font-size: 11px !important;
+    line-height: 1.45;
+    color: #78350f !important;
+}
+
 .plu-metabox-section {
     margin-bottom: 12px;
 }

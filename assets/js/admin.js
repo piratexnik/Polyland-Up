@@ -196,6 +196,11 @@
             const $overwriteCb = $('#plu_overwrite_existing');
             const $spinner = $('#plu-duplicator-spinner');
             const $logBox = $('#plu-duplicator-log');
+            const $swapCb = $('#plu-swap-actual-lang');
+            const $swapBody = $('#plu-swap-actual-lang-body');
+            const $actualLangSelect = $('#plu_actual_content_lang');
+            const $swapHint = $('#plu-swap-hint');
+            const assignedLang = String($box.attr('data-assigned-lang') || '').toLowerCase();
 
             // Проверка необходимости показа галочки подтверждения перезаписи
             const toggleOverwriteVisibility = function() {
@@ -215,7 +220,68 @@
                 }
             };
 
-            $box.on('change', '.plu-target-lang-cb', toggleOverwriteVisibility);
+            const updateSwapHint = function() {
+                if (!$swapHint.length || !$swapCb.is(':checked')) {
+                    return;
+                }
+                const actualSlug = String($actualLangSelect.val() || '').toLowerCase();
+                const actualUpper = esc(actualSlug.toUpperCase());
+                const assignedUpper = esc(assignedLang.toUpperCase());
+                const otherSelected = [];
+
+                $box.find('.plu-target-lang-cb:checked').each(function() {
+                    const slug = String($(this).val() || '').toLowerCase();
+                    if (slug && slug !== actualSlug) {
+                        otherSelected.push(slug.toUpperCase());
+                    }
+                });
+
+                let hint = `1) Текущий текст без перевода сохранится в языковую версию <strong>[${actualUpper}]</strong>. `
+                    + `2) Сама текущая запись <strong>[${assignedUpper}]</strong> будет переведена с [${actualUpper}] на [${assignedUpper}].`;
+
+                if (otherSelected.length > 0) {
+                    hint += ` 3) Остальные отмеченные языки (<strong>[${esc(otherSelected.join(', '))}]</strong>) также будут переведены с [${actualUpper}].`;
+                }
+
+                $swapHint.html(hint);
+            };
+
+            $swapCb.on('change', function() {
+                if ($(this).is(':checked')) {
+                    $swapBody.slideDown(150);
+
+                    // Автоматически отмечаем все целевые языки (включая actual_content_lang)
+                    let hasExisting = false;
+                    $box.find('.plu-target-lang-cb').each(function() {
+                        $(this).prop('checked', true);
+                        if (String($(this).attr('data-exists')) === '1') {
+                            hasExisting = true;
+                        }
+                    });
+
+                    toggleOverwriteVisibility();
+                    if (hasExisting) {
+                        $overwriteCb.prop('checked', true);
+                    }
+
+                    // Если стоял режим без перевода, переключаем на переводчик по умолчанию
+                    const $modeSelect = $('#plu_mode');
+                    if ($modeSelect.val() === 'clone_only') {
+                        const defMode = String($box.attr('data-default-mode') || 'translate_gtx');
+                        $modeSelect.val(defMode);
+                    }
+
+                    updateSwapHint();
+                } else {
+                    $swapBody.slideUp(150);
+                }
+            });
+
+            $actualLangSelect.on('change', updateSwapHint);
+            $box.on('change', '.plu-target-lang-cb', function() {
+                toggleOverwriteVisibility();
+                updateSwapHint();
+            });
             toggleOverwriteVisibility();
 
             // Последовательная обработка выбранных языков
@@ -227,6 +293,15 @@
                     $logBox.append(
                         `<div class="plu-log-item is-success"><strong>&#127881; ${esc(i18n.finished_all || 'Обработка завершена.')}</strong></div>`
                     );
+
+                    if (params.selfUpdatedLang) {
+                        $logBox.append(
+                            `<div class="plu-log-item is-success" style="margin-top:6px;">` +
+                            `<button type="button" class="button button-primary" style="width:100%;" onclick="window.location.reload()">` +
+                            `&#128260; Обновить страницу редактора (текст переведен на ${esc(params.selfUpdatedLang)})` +
+                            `</button></div>`
+                        );
+                    }
                     return;
                 }
 
@@ -234,34 +309,55 @@
                 const stepNum = index + 1;
                 const totalNum = queue.length;
                 const langCodeUpper = esc(langItem.slug.toUpperCase());
-                const rowId = 'plu-log-step-' + langItem.slug;
+                const rowId = 'plu-log-step-' + (langItem.isSelfTranslate ? 'self-' : '') + langItem.slug;
 
-                const processingText = `${esc(i18n.processing_lang || 'Обработка языка')} ${langCodeUpper} (${stepNum} ${esc(i18n.of || 'из')} ${totalNum})...`;
+                let processingText = `${esc(i18n.processing_lang || 'Обработка языка')} ${langCodeUpper} (${stepNum} ${esc(i18n.of || 'из')} ${totalNum})...`;
+                if (langItem.isOriginalTransfer) {
+                    processingText = `Перенос оригинала в ${langCodeUpper} (${stepNum} ${esc(i18n.of || 'из')} ${totalNum})...`;
+                } else if (langItem.isSelfTranslate) {
+                    processingText = `Перевод самой текущей записи в ${langCodeUpper} (${stepNum} ${esc(i18n.of || 'из')} ${totalNum})...`;
+                }
+
                 $logBox.append(
                     `<div class="plu-log-item" id="${esc(rowId)}">&#9203; ${processingText}</div>`
                 );
+
+                const ajaxData = {
+                    action: 'plu_duplicate_post',
+                    nonce: pluAdminData.clone_nonce,
+                    post_id: params.postId,
+                    mode: params.mode,
+                    keep_same_slug: params.keepSameSlug ? 1 : 0,
+                    rewrite_links: params.rewriteLinks ? 1 : 0,
+                    target_status: params.targetStatus,
+                    overwrite_existing: params.overwriteExisting ? 1 : 0,
+                    swap_actual_lang: params.swapActualLang ? 1 : 0,
+                    actual_content_lang: params.actualContentLang || ''
+                };
+
+                if (langItem.isSelfTranslate) {
+                    ajaxData.self_translate = 1;
+                } else {
+                    ajaxData.target_lang = langItem.slug;
+                }
 
                 $.ajax({
                     url: pluAdminData.ajax_url,
                     type: 'POST',
                     dataType: 'json',
-                    data: {
-                        action: 'plu_duplicate_post',
-                        nonce: pluAdminData.clone_nonce,
-                        post_id: params.postId,
-                        target_lang: langItem.slug,
-                        mode: params.mode,
-                        keep_same_slug: params.keepSameSlug ? 1 : 0,
-                        rewrite_links: params.rewriteLinks ? 1 : 0,
-                        target_status: params.targetStatus,
-                        overwrite_existing: params.overwriteExisting ? 1 : 0
-                    },
+                    data: ajaxData,
                     success: function(response) {
                         const $stepRow = $('#' + rowId);
 
                         if (response.success && response.data) {
                             const d = response.data;
-                            const actionLabel = d.updated ? (i18n.done_updated || 'обновлён!') : (i18n.done_created || 'готов!');
+                            if (d.self_updated) {
+                                params.selfUpdatedLang = d.lang_upper || langCodeUpper;
+                            }
+
+                            const actionLabel = d.self_updated
+                                ? 'текущая запись обновлена!'
+                                : (d.updated ? (i18n.done_updated || 'обновлён!') : (i18n.done_created || 'готов!'));
                             const summaryHtml = d.translation_summary
                                 ? ` <span class="plu-log-summary">— ${esc(d.translation_summary)}.</span>`
                                 : '';
@@ -286,21 +382,23 @@
                             $stepRow.addClass('is-success').html(resultHtml);
 
                             // Обновляем статус-бейдж и быстрые ссылки в списке языков без перезагрузки страницы
-                            const $langRow = $box.find(`.plu-lang-row[data-lang-row="${langItem.slug}"]`);
-                            if ($langRow.length) {
-                                $langRow.removeClass('is-missing').addClass('is-existing');
-                                $langRow.find('.plu-target-lang-cb')
-                                    .attr('data-exists', '1')
-                                    .prop('checked', false);
+                            if (!langItem.isSelfTranslate) {
+                                const $langRow = $box.find(`.plu-lang-row[data-lang-row="${langItem.slug}"]`);
+                                if ($langRow.length) {
+                                    $langRow.removeClass('is-missing').addClass('is-existing');
+                                    $langRow.find('.plu-target-lang-cb')
+                                        .attr('data-exists', '1')
+                                        .prop('checked', false);
 
-                                const statusText = d.status === 'publish' ? 'Опубликовано' : 'Черновик';
-                                $langRow.find('.plu-lang-meta-row').html(`
-                                    <span class="plu-badge plu-badge-neutral">Уже есть: #${esc(d.post_id)} (${esc(statusText)})</span>
-                                    <span class="plu-lang-quick-links">
-                                        <a href="${esc(d.edit_url)}" title="Редактировать перевод" target="_blank" rel="noopener noreferrer"><span class="dashicons dashicons-edit"></span></a>
-                                        <a href="${esc(d.view_url)}" title="Открыть перевод" target="_blank" rel="noopener noreferrer"><span class="dashicons dashicons-visibility"></span></a>
-                                    </span>
-                                `);
+                                    const statusText = d.status === 'publish' ? 'Опубликовано' : 'Черновик';
+                                    $langRow.find('.plu-lang-meta-row').html(`
+                                        <span class="plu-badge plu-badge-neutral">Уже есть: #${esc(d.post_id)} (${esc(statusText)})</span>
+                                        <span class="plu-lang-quick-links">
+                                            <a href="${esc(d.edit_url)}" title="Редактировать перевод" target="_blank" rel="noopener noreferrer"><span class="dashicons dashicons-edit"></span></a>
+                                            <a href="${esc(d.view_url)}" title="Открыть перевод" target="_blank" rel="noopener noreferrer"><span class="dashicons dashicons-visibility"></span></a>
+                                        </span>
+                                    `);
+                                }
                             }
                         } else {
                             const errMsg = (response.data && response.data.message) ? response.data.message : 'Ошибка при клонировании.';
@@ -328,21 +426,41 @@
             $runBtn.on('click', function(e) {
                 e.preventDefault();
 
-                const queue = [];
+                let queue = [];
                 let hasExistingSelected = false;
+                const swapActualLang = $swapCb.is(':checked');
+                const actualContentLang = swapActualLang ? String($actualLangSelect.val() || '').toLowerCase() : '';
 
                 $box.find('.plu-target-lang-cb:checked').each(function() {
                     const $cb = $(this);
+                    const slug = String($cb.val() || '').toLowerCase();
                     const isExisting = String($cb.attr('data-exists')) === '1';
                     if (isExisting) {
                         hasExistingSelected = true;
                     }
                     queue.push({
-                        slug: String($cb.val()),
-                        name: String($cb.attr('data-lang-name') || $cb.val()),
-                        exists: isExisting
+                        slug: slug,
+                        name: String($cb.attr('data-lang-name') || slug),
+                        exists: isExisting,
+                        isOriginalTransfer: swapActualLang && slug === actualContentLang
                     });
                 });
+
+                if (swapActualLang && actualContentLang) {
+                    // Перенос оригинала ставим первым, остальные переводы — после, и в конце — перевод самой открытой записи
+                    const origItems = queue.filter(item => item.isOriginalTransfer);
+                    const otherItems = queue.filter(item => !item.isOriginalTransfer);
+                    queue = origItems.concat(otherItems);
+
+                    if (assignedLang && assignedLang !== actualContentLang) {
+                        queue.push({
+                            slug: assignedLang,
+                            name: assignedLang.toUpperCase(),
+                            exists: true,
+                            isSelfTranslate: true
+                        });
+                    }
+                }
 
                 $logBox.empty().show();
 
@@ -363,7 +481,10 @@
                     keepSameSlug: $('#plu_keep_same_slug').is(':checked'),
                     rewriteLinks: $('#plu_rewrite_links').is(':checked'),
                     targetStatus: String($('#plu_target_status').val() || 'draft'),
-                    overwriteExisting: overwriteExisting
+                    overwriteExisting: overwriteExisting,
+                    swapActualLang: swapActualLang,
+                    actualContentLang: actualContentLang,
+                    selfUpdatedLang: ''
                 };
 
                 $runBtn.prop('disabled', true);

@@ -91,8 +91,26 @@ final class MetaboxUI {
         $default_mode       = 'gemini' === $default_translator ? 'translate_gemini' : 'translate_gtx';
         $enable_same_slug   = (bool) plu_get_option( 'enable_same_slug', 1 );
         $post_slug          = '' !== $post->post_name ? $post->post_name : sanitize_title( $post->post_title );
+
+        // Язык по умолчанию для селекта фактического языка текста (если текущая запись uk -> выбираем ru)
+        $default_actual_lang = '';
+        foreach ( $target_languages as $tl ) {
+            if ( 'uk' === $source_lang && 'ru' === (string) $tl->slug ) {
+                $default_actual_lang = 'ru';
+                break;
+            }
+        }
+        if ( '' === $default_actual_lang && ! empty( $target_languages ) ) {
+            $default_actual_lang = (string) $target_languages[0]->slug;
+        }
         ?>
-        <div class="plu-metabox-wrap" id="plu-duplicator-box" data-post-id="<?php echo esc_attr( (string) $post->ID ); ?>">
+        <div
+            class="plu-metabox-wrap"
+            id="plu-duplicator-box"
+            data-post-id="<?php echo esc_attr( (string) $post->ID ); ?>"
+            data-assigned-lang="<?php echo esc_attr( $source_lang ); ?>"
+            data-default-mode="<?php echo esc_attr( $default_mode ); ?>"
+        >
             <div class="plu-source-lang-banner">
                 <strong><?php esc_html_e( 'Исходный язык:', 'polyland-up' ); ?></strong>
                 <span class="plu-lang-pill">
@@ -105,6 +123,30 @@ final class MetaboxUI {
                     <?php esc_html_e( 'В Polylang пока не добавлены другие языки для перевода.', 'polyland-up' ); ?>
                 </p>
             <?php else : ?>
+                <div class="plu-metabox-section plu-swap-lang-box">
+                    <label class="plu-option-checkbox" for="plu-swap-actual-lang">
+                        <input type="checkbox" id="plu-swap-actual-lang" name="swap_actual_lang" value="1" />
+                        <span><strong><?php esc_html_e( '🔄 Текст внутри записи фактически на другом языке (перенести оригинал и перевести текущую запись)', 'polyland-up' ); ?></strong></span>
+                    </label>
+
+                    <div id="plu-swap-actual-lang-body" class="plu-swap-actual-lang-body" style="display:none;">
+                        <label for="plu_actual_content_lang" class="plu-section-label" style="margin-top:8px;">
+                            <?php esc_html_e( 'Фактический язык текста сейчас:', 'polyland-up' ); ?>
+                        </label>
+                        <select id="plu_actual_content_lang" name="actual_content_lang" class="widefat">
+                            <?php foreach ( $target_languages as $tl ) : ?>
+                                <?php
+                                $tl_slug = (string) $tl->slug;
+                                $tl_name = (string) ( $tl->name ?? $tl_slug );
+                                ?>
+                                <option value="<?php echo esc_attr( $tl_slug ); ?>" <?php selected( $default_actual_lang, $tl_slug ); ?>>
+                                    <?php echo esc_html( $tl_name . ' (' . strtoupper( $tl_slug ) . ')' ); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="description plu-swap-hint" id="plu-swap-hint"></p>
+                    </div>
+                </div>
                 <div class="plu-metabox-section">
                     <div class="plu-section-label"><?php esc_html_e( 'Целевые языки:', 'polyland-up' ); ?></div>
                     <div class="plu-target-langs-list">
@@ -282,15 +324,33 @@ final class MetaboxUI {
             $target_status = 'draft';
         }
 
+        $swap_actual_lang    = ! empty( $_POST['swap_actual_lang'] );
+        $actual_content_lang = isset( $_POST['actual_content_lang'] ) ? sanitize_key( wp_unslash( (string) $_POST['actual_content_lang'] ) ) : '';
+        $self_translate      = ! empty( $_POST['self_translate'] );
+
         $options = [
-            'mode'               => $mode,
-            'keep_same_slug'     => ! empty( $_POST['keep_same_slug'] ),
-            'rewrite_links'      => ! empty( $_POST['rewrite_links'] ),
-            'target_status'      => $target_status,
-            'overwrite_existing' => ! empty( $_POST['overwrite_existing'] ),
+            'mode'                => $mode,
+            'keep_same_slug'      => ! empty( $_POST['keep_same_slug'] ),
+            'rewrite_links'       => ! empty( $_POST['rewrite_links'] ),
+            'target_status'       => $target_status,
+            'overwrite_existing'  => ! empty( $_POST['overwrite_existing'] ),
+            'swap_actual_lang'    => $swap_actual_lang,
+            'actual_content_lang' => $actual_content_lang,
         ];
 
         try {
+            // Специальный шаг: перевод самой текущей открытой записи (с фактического языка текста на её язык в Polylang)
+            if ( $self_translate && $swap_actual_lang && '' !== $actual_content_lang ) {
+                $result = self::self_translate_source_post( $source_post, $actual_content_lang, $options );
+                if ( is_wp_error( $result ) ) {
+                    wp_send_json_error( [
+                        'message' => $result->get_error_message(),
+                        'lang'    => (string) ( function_exists( 'pll_get_post_language' ) ? pll_get_post_language( $source_post->ID, 'slug' ) : '' ),
+                    ] );
+                }
+                wp_send_json_success( $result );
+            }
+
             // Поддержка как одиночного target_lang (пошаговый AJAX из JS), так и массива target_langs
             $single_lang = isset( $_POST['target_lang'] ) ? sanitize_key( wp_unslash( (string) $_POST['target_lang'] ) ) : '';
             if ( '' !== $single_lang ) {
@@ -313,9 +373,19 @@ final class MetaboxUI {
                 ] );
             }
 
+            // При swap_actual_lang фиксируем исходный пост в памяти и сначала переносим оригинал в actual_content_lang
+            $frozen_source = clone $source_post;
+            if ( $swap_actual_lang && '' !== $actual_content_lang && in_array( $actual_content_lang, $target_langs, true ) ) {
+                $target_langs = array_values(
+                    array_unique(
+                        array_merge( [ $actual_content_lang ], $target_langs )
+                    )
+                );
+            }
+
             $results = [];
             foreach ( $target_langs as $lang_slug ) {
-                $res = self::duplicate_post_to_language( $source_post, $lang_slug, $options );
+                $res = self::duplicate_post_to_language( $frozen_source, $lang_slug, $options );
                 if ( is_wp_error( $res ) ) {
                     $results[] = [
                         'success' => false,
@@ -327,8 +397,24 @@ final class MetaboxUI {
                 }
             }
 
+            $self_updated = false;
+            if ( $swap_actual_lang && '' !== $actual_content_lang ) {
+                $self_res = self::self_translate_source_post( $frozen_source, $actual_content_lang, $options );
+                if ( is_wp_error( $self_res ) ) {
+                    $results[] = [
+                        'success' => false,
+                        'lang'    => (string) ( function_exists( 'pll_get_post_language' ) ? pll_get_post_language( $frozen_source->ID, 'slug' ) : '' ),
+                        'message' => $self_res->get_error_message(),
+                    ];
+                } else {
+                    $self_updated = ! empty( $self_res['self_updated'] );
+                    $results[]    = array_merge( [ 'success' => true ], $self_res );
+                }
+            }
+
             wp_send_json_success( [
-                'results' => $results,
+                'results'      => $results,
+                'self_updated' => $self_updated,
             ] );
         } catch ( \Throwable $e ) {
             wp_send_json_error( [
@@ -412,6 +498,24 @@ final class MetaboxUI {
         $translation_summary   = '';
         $mode                  = (string) ( $options['mode'] ?? 'clone_only' );
         $notes                 = [];
+        $swap_actual_lang      = ! empty( $options['swap_actual_lang'] );
+        $actual_content_lang   = (string) ( $options['actual_content_lang'] ?? '' );
+        $effective_source_lang = $source_lang;
+
+        // Режим swap_actual_lang:
+        // - для языка actual_content_lang переносим оригинал без перевода (clone_only);
+        // - для остальных языков переводим с actual_content_lang.
+        if ( $swap_actual_lang && '' !== $actual_content_lang ) {
+            if ( $target_lang === $actual_content_lang ) {
+                $mode                = 'clone_only';
+                $translation_summary = sprintf(
+                    __( 'Оригинал текста перенесён без перевода (%s)', 'polyland-up' ),
+                    strtoupper( $actual_content_lang )
+                );
+            } else {
+                $effective_source_lang = $actual_content_lang;
+            }
+        }
 
         $is_translation_mode = in_array( $mode, [ 'translate_gtx', 'translate_gemini' ], true );
         if ( $is_translation_mode ) {
@@ -424,7 +528,7 @@ final class MetaboxUI {
             ) {
                 $translated = \PolylangUp\Modules\DiviParser::translate_post_data(
                     $source_post,
-                    $source_lang,
+                    $effective_source_lang,
                     $target_lang,
                     $engine
                 );
@@ -568,6 +672,166 @@ final class MetaboxUI {
             'translation_stats'     => $translation_stats,
             'translation_summary'   => $translation_summary,
         ];
+        } finally {
+            if ( function_exists( 'PLL' ) && is_object( PLL() ) && property_exists( PLL(), 'curlang' ) ) {
+                PLL()->curlang = $prev_curlang;
+            }
+        }
+    }
+
+    /**
+     * Переводит саму исходную запись с фактического языка текста на её назначенный язык в Polylang.
+     * Используется в режиме swap_actual_lang после переноса оригинала в языковую версию actual_content_lang.
+     *
+     * @param \WP_Post             $source_post         Исходная запись (с ещё не перезаписанным оригиналом).
+     * @param string               $actual_content_lang Фактический язык текста внутри записи (например, 'ru').
+     * @param array<string, mixed> $options             Опции перевода и перелинковки.
+     * @return array<string, mixed>|\WP_Error Результат обновления или ошибка.
+     */
+    public static function self_translate_source_post( \WP_Post $source_post, string $actual_content_lang, array $options = [] ): array|\WP_Error {
+        if ( ! function_exists( 'pll_languages_list' ) || ! function_exists( 'pll_get_post_language' ) ) {
+            return new \WP_Error( 'plu_no_polylang', __( 'Polylang не активен.', 'polyland-up' ) );
+        }
+
+        $valid_langs = (array) pll_languages_list( [ 'fields' => 'slug' ] );
+        if ( ! in_array( $actual_content_lang, $valid_langs, true ) ) {
+            return new \WP_Error( 'plu_invalid_lang', sprintf( __( 'Недопустимый код языка: %s.', 'polyland-up' ), $actual_content_lang ) );
+        }
+
+        $assigned_lang = (string) pll_get_post_language( $source_post->ID, 'slug' );
+        if ( '' === $assigned_lang ) {
+            return new \WP_Error( 'plu_no_source_lang', __( 'У исходной записи не указан язык Polylang.', 'polyland-up' ) );
+        }
+
+        if ( $assigned_lang === $actual_content_lang ) {
+            return new \WP_Error( 'plu_same_lang', __( 'Фактический язык текста совпадает с языком записи в Polylang.', 'polyland-up' ) );
+        }
+
+        $mode = (string) ( $options['mode'] ?? 'translate_gtx' );
+        if ( 'translate_gemini' === $mode ) {
+            $engine = 'gemini';
+        } elseif ( 'translate_gtx' === $mode ) {
+            $engine = 'gtx';
+        } else {
+            $default_translator = (string) plu_get_option( 'default_translator', 'gtx' );
+            $engine             = ( 'gemini' === $default_translator ) ? 'gemini' : 'gtx';
+        }
+
+        if (
+            ! class_exists( \PolylangUp\Modules\DiviParser::class )
+            || ! class_exists( \PolylangUp\Modules\TranslatorAPI::class )
+            || ! method_exists( \PolylangUp\Modules\DiviParser::class, 'translate_post_data' )
+        ) {
+            return new \WP_Error( 'plu_no_parser', __( 'Модуль AI-парсера недоступен.', 'polyland-up' ) );
+        }
+
+        $prev_curlang = ( function_exists( 'PLL' ) && is_object( PLL() ) && isset( PLL()->curlang ) )
+            ? PLL()->curlang
+            : null;
+
+        try {
+            $translated = \PolylangUp\Modules\DiviParser::translate_post_data(
+                $source_post,
+                $actual_content_lang,
+                $assigned_lang,
+                $engine
+            );
+            if ( is_wp_error( $translated ) ) {
+                return $translated;
+            }
+
+            $post_title            = (string) ( $translated['post_title'] ?? $source_post->post_title );
+            $post_excerpt          = (string) ( $translated['post_excerpt'] ?? $source_post->post_excerpt );
+            $post_content          = (string) ( $translated['post_content'] ?? $source_post->post_content );
+            $rank_math_meta        = is_array( $translated['rank_math_meta'] ?? null ) ? $translated['rank_math_meta'] : [];
+            $translated_count      = (int) ( $translated['translated_count'] ?? 0 );
+            $translation_stats     = is_array( $translated['stats'] ?? null ) ? $translated['stats'] : [];
+            $rewritten_links_count = 0;
+
+            if ( ! empty( $options['rewrite_links'] ) ) {
+                if (
+                    class_exists( \PolylangUp\Modules\LinkRewriter::class )
+                    && method_exists( \PolylangUp\Modules\LinkRewriter::class, 'rewrite_content' )
+                ) {
+                    $post_content          = \PolylangUp\Modules\LinkRewriter::rewrite_content( $post_content, $assigned_lang );
+                    $rewritten_links_count = \PolylangUp\Modules\LinkRewriter::get_last_rewritten_count();
+                }
+            }
+
+            SameSlug::$forced_lang = $assigned_lang;
+            try {
+                $update_data = [
+                    'ID'            => $source_post->ID,
+                    'post_title'    => wp_slash( $post_title ),
+                    'post_excerpt'  => wp_slash( $post_excerpt ),
+                    'post_content'  => wp_slash( $post_content ),
+                    'post_name'     => $source_post->post_name,
+                    'post_date'     => $source_post->post_date,
+                    'post_date_gmt' => $source_post->post_date_gmt,
+                    'post_status'   => $source_post->post_status,
+                ];
+
+                $res_id = wp_update_post( $update_data, true );
+                if ( is_wp_error( $res_id ) ) {
+                    return $res_id;
+                }
+            } finally {
+                SameSlug::$forced_lang = null;
+            }
+
+            // Очищаем кеш стилей Divi у обновленной текущей записи
+            foreach ( [
+                '_et_pb_static_css_file',
+                '_et_core_cached_shortcodes',
+                '_et_dynamic_cached_shortcodes',
+                '_et_builder_module_features_cache',
+            ] as $cache_key ) {
+                delete_post_meta( $source_post->ID, $cache_key );
+            }
+
+            // Обновляем переведенные SEO-поля Rank Math
+            if ( ! empty( $rank_math_meta ) ) {
+                foreach ( $rank_math_meta as $meta_key => $meta_value ) {
+                    if ( is_string( $meta_key ) && is_string( $meta_value ) && '' !== trim( $meta_value ) ) {
+                        update_post_meta( $source_post->ID, $meta_key, wp_slash( $meta_value ) );
+                    }
+                }
+            }
+
+            if ( $translated_count > 0 ) {
+                $provider            = (string) ( $translation_stats['provider_label'] ?? ( 'gemini' === $engine ? 'Google Gemini AI' : 'Google GTX' ) );
+                $time_str            = number_format( (float) ( $translation_stats['time_sec'] ?? 0.0 ), 1, '.', '' );
+                $translation_summary = sprintf(
+                    '%s (%s, %s %s)',
+                    self::format_translated_blocks_count( $translated_count ),
+                    $provider,
+                    $time_str,
+                    __( 'сек', 'polyland-up' )
+                );
+            } else {
+                $translation_summary = __( 'Текущая запись обновлена', 'polyland-up' );
+            }
+
+            $view_url = (string) get_permalink( $source_post->ID );
+
+            return [
+                'post_id'               => $source_post->ID,
+                'lang'                  => $assigned_lang,
+                'lang_upper'            => strtoupper( $assigned_lang ),
+                'title'                 => get_the_title( $source_post->ID ),
+                'slug'                  => (string) get_post_field( 'post_name', $source_post->ID ),
+                'status'                => (string) get_post_status( $source_post->ID ),
+                'updated'               => true,
+                'self_updated'          => true,
+                'edit_url'              => (string) get_edit_post_link( $source_post->ID, 'raw' ),
+                'view_url'              => $view_url,
+                'divi_url'              => add_query_arg( 'et_fb', '1', $view_url ),
+                'notes'                 => [],
+                'translated_count'      => $translated_count,
+                'rewritten_links_count' => $rewritten_links_count,
+                'translation_stats'     => $translation_stats,
+                'translation_summary'   => $translation_summary,
+            ];
         } finally {
             if ( function_exists( 'PLL' ) && is_object( PLL() ) && property_exists( PLL(), 'curlang' ) ) {
                 PLL()->curlang = $prev_curlang;
