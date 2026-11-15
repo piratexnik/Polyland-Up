@@ -31,6 +31,28 @@ final class LoopPagination {
 	private static bool $in_pre_get_posts = false;
 
 	/**
+	 * Флаг активности рендера блока Divi 5 с включенным Loop.
+	 */
+	public static bool $in_divi_loop_block = false;
+
+	/**
+	 * Стек вложенных блоков для точного отслеживания границ Loop-блока.
+	 *
+	 * @var array<int, array<string, mixed>|null>
+	 */
+	private static array $block_stack = [];
+
+	/**
+	 * Количество найденных записей из последнего выполненного запроса Divi 5 Loop.
+	 */
+	public static ?int $last_loop_found_posts = null;
+
+	/**
+	 * Шаг выборки (posts_per_page) из последнего выполненного запроса Divi 5 Loop.
+	 */
+	public static ?int $last_loop_per_page = null;
+
+	/**
 	 * Флаг однократного вывода инлайн-стилей на странице.
 	 */
 	private static bool $styles_printed = false;
@@ -49,11 +71,39 @@ final class LoopPagination {
 	];
 
 	/**
+	 * Системные типы записей WordPress и Divi, которые не являются пользовательским циклом Loop.
+	 *
+	 * @var string[]
+	 */
+	private const SYSTEM_POST_TYPES = [
+		'et_pb_layout',
+		'et_header_layout',
+		'et_body_layout',
+		'et_footer_layout',
+		'et_theme_builder',
+		'et_template',
+		'nav_menu_item',
+		'revision',
+		'attachment',
+		'wp_navigation',
+		'wp_block',
+		'wp_template',
+		'wp_template_part',
+		'custom_css',
+		'customize_changeset',
+	];
+
+	/**
 	 * Инициализация хуков и шорткодов модуля.
 	 */
 	public static function init(): void {
-		// Синхронизация posts_per_page с Divi 5 Loop до выполнения основного SQL-запроса
+		// Отслеживание границ рендера блоков Divi 5 Loop
+		add_filter( 'pre_render_block', [ self::class, 'track_loop_block_start' ], 5, 2 );
+		add_filter( 'render_block', [ self::class, 'track_loop_block_end' ], 999, 2 );
+
+		// Синхронизация основного запроса WP и вторичного WP_Query внутри Divi 5 Loop
 		add_action( 'pre_get_posts', [ self::class, 'sync_main_query_posts_per_page' ], 20 );
+		add_filter( 'the_posts', [ self::class, 'capture_loop_query_stats' ], 10, 2 );
 
 		// Шорткоды пагинации и кнопки «Читать далее»
 		add_shortcode( 'plu_pagination', [ self::class, 'render_shortcode_pagination' ] );
@@ -89,8 +139,183 @@ final class LoopPagination {
 	}
 
 	/**
-	 * Синхронизирует posts_per_page основного запроса WordPress с настройкой Divi 5 Loop,
-	 * чтобы избежать 404 на дальних страницах пагинации (/page/40/, /page/66/).
+	 * Отслеживает начало рендера блока Divi 5 и поднимает флаг контекста Loop-блока.
+	 *
+	 * @param mixed $pre_render   Предварительный вывод блока (null — продолжить стандартный рендер).
+	 * @param mixed $parsed_block Данные распарсенного блока.
+	 * @return mixed
+	 */
+	public static function track_loop_block_start( mixed $pre_render, mixed $parsed_block ): mixed {
+		if ( null !== $pre_render ) {
+			return $pre_render;
+		}
+
+		$loop_context = null;
+
+		if ( is_array( $parsed_block ) ) {
+			$block_name = strtolower( (string) ( $parsed_block['blockName'] ?? '' ) );
+			$attrs      = is_array( $parsed_block['attrs'] ?? null ) ? $parsed_block['attrs'] : [];
+
+			$is_loop_block = ( ! empty( $attrs ) && self::is_divi5_loop_enabled( $attrs ) )
+				|| str_contains( $block_name, 'divi/blog' )
+				|| str_contains( $block_name, 'divi/post-slider' )
+				|| str_contains( $block_name, 'divi/loop' );
+
+			if ( $is_loop_block ) {
+				$loop_context = [
+					'per_page'    => self::find_per_page_in_attrs( $attrs ),
+					'base_offset' => self::find_offset_in_attrs( $attrs ),
+				];
+			}
+		}
+
+		self::$block_stack[]      = $loop_context;
+		self::$in_divi_loop_block = ! empty( array_filter( self::$block_stack ) );
+
+		return null;
+	}
+
+	/**
+	 * Отслеживает завершение рендера блока Divi 5 и обновляет стек контекста Loop.
+	 *
+	 * @param mixed $block_content HTML-содержимое блока.
+	 * @param mixed $block         Данные блока.
+	 * @return mixed
+	 */
+	public static function track_loop_block_end( mixed $block_content, mixed $block = [] ): mixed {
+		if ( ! empty( self::$block_stack ) ) {
+			array_pop( self::$block_stack );
+		}
+
+		self::$in_divi_loop_block = ! empty( array_filter( self::$block_stack ) );
+
+		return $block_content;
+	}
+
+	/**
+	 * Возвращает параметры самого внутреннего активного Loop-блока из стека.
+	 *
+	 * @return array<string, mixed>|null
+	 */
+	private static function get_active_loop_context(): ?array {
+		for ( $i = count( self::$block_stack ) - 1; $i >= 0; $i-- ) {
+			if ( is_array( self::$block_stack[ $i ] ) ) {
+				return self::$block_stack[ $i ];
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Универсально определяет текущую страницу пагинации из query_var, GET-параметров и REQUEST_URI.
+	 *
+	 * @return int Номер страницы (>= 1).
+	 */
+	public static function get_current_page(): int {
+		$current_page = max(
+			1,
+			(int) get_query_var( 'paged' ),
+			(int) get_query_var( 'page' )
+		);
+
+		foreach ( [ 'paged', 'et_loop_page', 'loop_page' ] as $get_key ) {
+			if ( isset( $_GET[ $get_key ] ) ) {
+				$get_page = absint( wp_unslash( $_GET[ $get_key ] ) );
+				if ( $get_page > 0 ) {
+					$current_page = $get_page;
+					break;
+				}
+			}
+		}
+
+		if ( $current_page <= 1 && ! empty( $_SERVER['REQUEST_URI'] ) ) {
+			$request_uri = sanitize_text_field( wp_unslash( (string) $_SERVER['REQUEST_URI'] ) );
+			$path        = (string) wp_parse_url( $request_uri, PHP_URL_PATH );
+			if ( '' !== $path && preg_match( '#/page/(\d+)(?:/|$)#i', $path, $matches ) ) {
+				$uri_page = (int) $matches[1];
+				if ( $uri_page > 1 ) {
+					$current_page = $uri_page;
+				}
+			}
+		}
+
+		return max( 1, $current_page );
+	}
+
+	/**
+	 * Проверяет, содержит ли запрос исключительно системные типы записей WordPress / Divi.
+	 *
+	 * @param mixed $post_type Значение query_var 'post_type'.
+	 * @return bool
+	 */
+	private static function is_only_system_post_types( mixed $post_type ): bool {
+		if ( empty( $post_type ) ) {
+			return false;
+		}
+
+		$types = is_array( $post_type ) ? $post_type : [ (string) $post_type ];
+		$types = array_filter( array_map( 'strval', $types ) );
+
+		if ( empty( $types ) ) {
+			return false;
+		}
+
+		foreach ( $types as $pt ) {
+			if ( ! in_array( $pt, self::SYSTEM_POST_TYPES, true ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Эвристически определяет, является ли вторичный WP_Query циклом записей Divi 5 Loop.
+	 *
+	 * @param \WP_Query $query Экземпляр WP_Query.
+	 * @return bool
+	 */
+	private static function is_divi_loop_secondary_query( \WP_Query $query ): bool {
+		if ( self::$in_divi_loop_block ) {
+			return true;
+		}
+
+		// Исключаем запросы до основного этапа рендера шаблона
+		if ( ! did_action( 'wp' ) && ! ( function_exists( 'wp_doing_ajax' ) && wp_doing_ajax() ) ) {
+			return false;
+		}
+
+		// Исключаем точечные выборки по ID/slug (например, single lookup)
+		if ( $query->get( 'p' ) || $query->get( 'page_id' ) || $query->get( 'name' ) || $query->get( 'pagename' ) ) {
+			return false;
+		}
+
+		$fields = (string) $query->get( 'fields' );
+		$pp     = (int) $query->get( 'posts_per_page' );
+		if ( 'ids' === $fields && 1 === $pp && (bool) $query->get( 'no_found_rows' ) ) {
+			return false;
+		}
+
+		// Если мы на архиве/главной/поиске и идет рендер контента Divi Theme Builder
+		$is_archive_context = is_archive() || is_home() || is_search();
+		$in_render_phase    = doing_filter( 'the_content' )
+			|| doing_filter( 'render_block' )
+			|| ( did_action( 'et_before_main_content' ) > 0 && ! did_action( 'et_after_main_content' ) );
+
+		if ( $is_archive_context && $in_render_phase ) {
+			$pt = $query->get( 'post_type' );
+			if ( empty( $pt ) || 'post' === $pt || ( is_array( $pt ) && in_array( 'post', $pt, true ) ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Синхронизирует основной запрос WordPress (предотвращает 404 на дальних страницах)
+	 * и инжектирует paged / offset во вторичные WP_Query внутри блоков Divi 5 Loop.
 	 *
 	 * @param mixed $query Экземпляр WP_Query.
 	 */
@@ -99,23 +324,112 @@ final class LoopPagination {
 			return;
 		}
 
-		if ( is_admin() || ! $query->is_main_query() ) {
+		if ( is_admin() || (bool) $query->get( 'suppress_filters' ) ) {
 			return;
 		}
 
-		if ( ! ( $query->is_archive() || $query->is_home() || $query->is_search() ) ) {
+		if ( self::is_only_system_post_types( $query->get( 'post_type' ) ) ) {
 			return;
 		}
 
 		self::$in_pre_get_posts = true;
 		try {
-			$per_page = self::detect_divi_loop_per_page();
-			if ( null !== $per_page && $per_page > 0 ) {
-				$query->set( 'posts_per_page', $per_page );
+			// 1. Основной запрос WordPress
+			if ( $query->is_main_query() ) {
+				if ( $query->is_archive() || $query->is_home() || $query->is_search() ) {
+					$per_page = self::detect_divi_loop_per_page();
+					if ( null !== $per_page && $per_page > 0 ) {
+						$query->set( 'posts_per_page', $per_page );
+					}
+				}
+				return;
 			}
+
+			// 2. Вторичный запрос внутри блока Divi 5 Loop
+			if ( ! self::is_divi_loop_secondary_query( $query ) ) {
+				return;
+			}
+
+			$ctx      = self::get_active_loop_context();
+			$paged    = self::get_current_page();
+			$q_pp     = (int) $query->get( 'posts_per_page' );
+			$per_page = $q_pp > 0
+				? $q_pp
+				: ( $ctx['per_page'] ?? self::detect_divi_loop_per_page() ?? (int) get_option( 'posts_per_page', 10 ) );
+
+			if ( $per_page <= 0 ) {
+				$per_page = 10;
+			}
+
+			if ( $paged > 1 ) {
+				$query->set( 'paged', $paged );
+
+				// КРИТИЧНО: в WordPress любой числовой offset (даже 0) отключает paged,
+				// поэтому пересчитываем реальный сдвиг с учетом текущей страницы.
+				if (
+					array_key_exists( 'offset', $query->query_vars )
+					&& '' !== $query->query_vars['offset']
+					&& false !== $query->query_vars['offset']
+					&& null !== $query->query_vars['offset']
+				) {
+					$raw_offset  = max( 0, (int) $query->get( 'offset' ) );
+					$ctx_offset  = isset( $ctx['base_offset'] ) ? (int) $ctx['base_offset'] : null;
+					$base_offset = ( null !== $ctx_offset && 0 === $raw_offset ) ? $ctx_offset : $raw_offset;
+					$calc_offset = $base_offset + ( ( $paged - 1 ) * $per_page );
+
+					$query->set( 'offset', $calc_offset );
+				}
+			}
+
+			// Синхронизируем таксономию текущего архива, если Divi Loop не передал её явно
+			if (
+				self::$in_divi_loop_block
+				&& ( is_category() || is_tag() || is_tax() )
+				&& empty( $query->get( 'tax_query' ) )
+				&& empty( $query->get( 'cat' ) )
+				&& empty( $query->get( 'category_name' ) )
+				&& empty( $query->get( 'tag' ) )
+				&& empty( $query->get( 'tag_id' ) )
+			) {
+				$queried_obj = get_queried_object();
+				if ( $queried_obj instanceof \WP_Term ) {
+					$query->set(
+						'tax_query',
+						[
+							[
+								'taxonomy' => $queried_obj->taxonomy,
+								'field'    => 'term_id',
+								'terms'    => [ $queried_obj->term_id ],
+							],
+						]
+					);
+				}
+			}
+
+			$query->set( 'no_found_rows', false );
+			$query->set( '_plu_is_divi_loop', true );
 		} finally {
 			self::$in_pre_get_posts = false;
 		}
+	}
+
+	/**
+	 * Перехватывает реальные found_posts и posts_per_page отработавшего запроса Divi 5 Loop.
+	 *
+	 * @param mixed $posts Массив найденных записей.
+	 * @param mixed $query Экземпляр WP_Query.
+	 * @return mixed
+	 */
+	public static function capture_loop_query_stats( mixed $posts, mixed $query = null ): mixed {
+		if ( $query instanceof \WP_Query && true === $query->get( '_plu_is_divi_loop' ) ) {
+			self::$last_loop_found_posts = max( 0, (int) $query->found_posts );
+			$q_pp                        = (int) $query->get( 'posts_per_page' );
+			if ( $q_pp > 0 ) {
+				self::$last_loop_per_page = $q_pp;
+			}
+		}
+
+		return $posts;
 	}
 
 	/**
@@ -462,6 +776,58 @@ final class LoopPagination {
 	}
 
 	/**
+	 * Рекурсивно ищет стартовый сдвиг (offset / post_offset) в массиве атрибутов блока Divi 5.
+	 *
+	 * @param array<string|int, mixed> $node Узел атрибутов.
+	 * @return int|null
+	 */
+	private static function find_offset_in_attrs( array $node ): ?int {
+		$offset_keys = [ 'offset', 'post_offset', 'postOffset', 'posts_offset', 'postsOffset' ];
+
+		foreach ( $node as $key => $value ) {
+			if ( in_array( (string) $key, $offset_keys, true ) ) {
+				$extracted = self::extract_non_negative_int( $value );
+				if ( null !== $extracted ) {
+					return $extracted;
+				}
+			}
+
+			if ( is_array( $value ) ) {
+				$nested = self::find_offset_in_attrs( $value );
+				if ( null !== $nested ) {
+					return $nested;
+				}
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Извлекает неотрицательное целое число из скаляра или вложенной структуры Divi 5 (desktop -> value).
+	 *
+	 * @param mixed $value Значение атрибута.
+	 * @return int|null
+	 */
+	private static function extract_non_negative_int( mixed $value ): ?int {
+		if ( is_int( $value ) || ( is_string( $value ) && is_numeric( trim( $value ) ) ) ) {
+			$num = (int) trim( (string) $value );
+			return $num >= 0 ? $num : null;
+		}
+
+		if ( is_array( $value ) ) {
+			if ( isset( $value['desktop']['value'] ) ) {
+				return self::extract_non_negative_int( $value['desktop']['value'] );
+			}
+			if ( isset( $value['value'] ) ) {
+				return self::extract_non_negative_int( $value['value'] );
+			}
+		}
+
+		return null;
+	}
+
+	/**
 	 * Гарантированное раскрытие шорткодов модуля в выводе Divi 5 / Theme Builder.
 	 *
 	 * @param mixed $output HTML-вывод модуля или блока.
@@ -583,37 +949,27 @@ final class LoopPagination {
 		}
 
 		// Определяем текущую страницу
-		$current_page = max(
-			1,
-			(int) get_query_var( 'paged' ),
-			(int) get_query_var( 'page' )
-		);
+		$current_page = self::get_current_page();
 
-		foreach ( [ 'et_loop_page', 'loop_page' ] as $get_key ) {
-			if ( isset( $_GET[ $get_key ] ) ) {
-				$get_page = absint( wp_unslash( $_GET[ $get_key ] ) );
-				if ( $get_page > 0 ) {
-					$current_page = $get_page;
-					break;
-				}
-			}
-		}
-
-		// Определяем per_page и total_pages
+		// Определяем per_page и total_pages (с приоритетом реальных данных отработавшего Divi 5 Loop)
 		$custom_per_page = ( '' !== trim( (string) $atts['per_page'] ) ) ? (int) $atts['per_page'] : 0;
-		$found_posts     = ( $wp_query instanceof \WP_Query ) ? (int) $wp_query->found_posts : 0;
+		$found_posts     = self::$last_loop_found_posts ?? ( ( $wp_query instanceof \WP_Query ) ? (int) $wp_query->found_posts : 0 );
 
 		if ( $custom_per_page > 0 ) {
 			$per_page    = $custom_per_page;
 			$total_pages = $found_posts > 0 ? (int) ceil( $found_posts / $per_page ) : 1;
 		} else {
-			$detected    = self::detect_divi_loop_per_page();
-			$query_pp    = ( $wp_query instanceof \WP_Query ) ? (int) $wp_query->get( 'posts_per_page' ) : 0;
-			$per_page    = $detected ?? ( $query_pp > 0 ? $query_pp : (int) get_option( 'posts_per_page', 10 ) );
-			$total_pages = ( $wp_query instanceof \WP_Query ) ? (int) $wp_query->max_num_pages : 1;
+			$detected = self::$last_loop_per_page ?? self::detect_divi_loop_per_page();
+			$query_pp = ( $wp_query instanceof \WP_Query ) ? (int) $wp_query->get( 'posts_per_page' ) : 0;
+			$per_page = $detected ?? ( $query_pp > 0 ? $query_pp : (int) get_option( 'posts_per_page', 10 ) );
 
-			if ( $total_pages < 1 && $found_posts > 0 && $per_page > 0 ) {
-				$total_pages = (int) ceil( $found_posts / $per_page );
+			if ( null !== self::$last_loop_found_posts && $per_page > 0 ) {
+				$total_pages = $found_posts > 0 ? (int) ceil( $found_posts / $per_page ) : 1;
+			} else {
+				$total_pages = ( $wp_query instanceof \WP_Query ) ? (int) $wp_query->max_num_pages : 1;
+				if ( $total_pages < 1 && $found_posts > 0 && $per_page > 0 ) {
+					$total_pages = (int) ceil( $found_posts / $per_page );
+				}
 			}
 		}
 
@@ -883,6 +1239,11 @@ final class LoopPagination {
 					);
 					?>
 				</p>
+
+				<div style="background:#fffbeb;border-left:4px solid #d97706;padding:12px 14px;border-radius:4px;margin-bottom:14px;font-size:13px;line-height:1.5;color:#1e293b;">
+					<strong><?php esc_html_e( '⚠️ Куда вставлять шорткоды в Divi 5:', 'polyland-up' ); ?></strong>
+					<?php esc_html_e( 'Шорткод кнопки [plu_read_more] вставляется ВНУТРЬ карточки с включенным Loop. А шорткод самой пагинации [plu_pagination] вставляется в ОТДЕЛЬНЫЙ ряд/модуль НИЖЕ ряда с циклом Loop (не включайте Loop на самом блоке пагинации!). Пагинация автоматически связывается с циклом выше и переключает его записи.', 'polyland-up' ); ?>
+				</div>
 
 				<div class="plu-pg-cheatsheet">
 					<?php foreach ( $shortcodes as $sc ) : ?>

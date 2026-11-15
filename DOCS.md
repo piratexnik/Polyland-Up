@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `2.9`
+- **Текущая версия:** `3.0`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -266,11 +266,16 @@ if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() )
    - Находит активный макет `et_body_layout` через `et_theme_builder_get_template_layouts()` или метаданные `_et_theme_builder` / `_et_template` / `_et_body_layout_id`.
    - Сканирует JSON-атрибуты блоков Divi 5 с включенным Loop (`loop -> enable -> desktop -> value === 'on'` или модули Blog/Post) и шорткоды Divi 4 на ключи `posts_per_page`, `postsPerPage`, `post_number`, `posts_number`, `postsNumber`.
    - Синхронизирует `posts_per_page` основного `WP_Query` на хуке `pre_get_posts` (с защитой от рекурсии), исключая 404 на дальних страницах (`/page/40/`, `/page/66/`).
-2. **Шорткоды:**
+2. **Синхронизация вторичного `WP_Query` внутри Divi 5 Loop (`pre_render_block` / `render_block` / `the_posts`):**
+   - Стек блоков (`$block_stack` и флаг `$in_divi_loop_block`) отслеживает границы рендера Loop-блоков (`divi/row`, `divi/blog`, `divi/post-slider`, `divi/loop` и любых блоков с `loop.enable === 'on'`), сохраняя `per_page` и `base_offset`.
+   - `get_current_page()` определяет текущую страницу из `query_var`, GET-параметров (`paged`, `et_loop_page`, `loop_page`) и `REQUEST_URI` (`/page/N/`).
+   - В `pre_get_posts` для вторичных запросов Loop (исключая системные `SYSTEM_POST_TYPES`) инжектирует `paged`, пересчитывает `offset = base_offset + (paged - 1) * per_page` (т.к. числовой `offset` в WP отключает `paged`), синхронизирует `tax_query` архива и выставляет `no_found_rows = false`.
+   - Фильтр `the_posts` (`capture_loop_query_stats()`) сохраняет реальные `found_posts` и `posts_per_page` отработавшего цикла Loop для точного расчета страниц в `[plu_pagination]`.
+3. **Шорткоды:**
    - `[plu_pagination]` (алиас `[scat_pagination]`): поддерживает атрибуты `per_page`, `mid_size`, `end_size`, `show_arrows`, `show_status`, `align`, мультиязычные строки (`pagination_prev`, `pagination_next`, `pagination_status` из `StringsManager`) и демонстрационный макет в Divi Visual Builder.
    - `[plu_read_more]`: выводит кнопку со ссылкой на текущую запись цикла Loop (`id`, `text`, `icon`, `class`) в стиле `solid`, `outline` или `link`.
-3. **Zero Bloat CSS и вкладка настроек (`admin.php?page=polylang-up&tab=pagination`):**
+4. **Zero Bloat CSS и вкладка настроек (`admin.php?page=polylang-up&tab=pagination`):**
    - Выводит компактный инлайн `<style>` с CSS-переменными (`--plu-pg-accent`, `--plu-pg-radius` и др.) однократно за запрос только при фактическом рендере шорткодов.
-   - Вкладка админки содержит шпаргалку с копированием в 1 клик, интерактивное Live Preview и форму настроек дизайна в `plu_settings`.
+   - Вкладка админки содержит предупреждение о размещении шорткодов (`[plu_read_more]` внутри Loop, `[plu_pagination]` в отдельном блоке ниже), шпаргалку с копированием в 1 клик, интерактивное Live Preview и форму настроек дизайна в `plu_settings`.
 
 
