@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `3.0`
+- **Текущая версия:** `3.1`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -42,7 +42,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '2.9'
+- `PLU_VERSION` — '3.1'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -272,7 +272,7 @@ if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() )
    - В `pre_get_posts` для вторичных запросов Loop (исключая системные `SYSTEM_POST_TYPES`) инжектирует `paged`, пересчитывает `offset = base_offset + (paged - 1) * per_page` (т.к. числовой `offset` в WP отключает `paged`), синхронизирует `tax_query` архива и выставляет `no_found_rows = false`.
    - Фильтр `the_posts` (`capture_loop_query_stats()`) сохраняет реальные `found_posts` и `posts_per_page` отработавшего цикла Loop для точного расчета страниц в `[plu_pagination]`.
 3. **Шорткоды:**
-   - `[plu_pagination]` (алиас `[scat_pagination]`): поддерживает атрибуты `per_page`, `mid_size`, `end_size`, `show_arrows`, `show_status`, `align`, мультиязычные строки (`pagination_prev`, `pagination_next`, `pagination_status` из `StringsManager`) и демонстрационный макет в Divi Visual Builder.
+   - `[plu_pagination]` (алиас `[scat_pagination]`): поддерживает атрибуты `per_page`, `mid_size`, `end_size`, `show_arrows`, `show_status`, `align`, мультиязычные строки (`pagination_prev`, `pagination_next`, `pagination_status` из `StringsManager`) и демонстрационный макет в Divi Visual Builder. Если шорткод размещен выше цикла Loop или на последней странице архива, используется легкий фоллбэк-подсчет `count_archive_found_posts()` (с кешем на запрос) и защита `total_pages >= current_page` на страницах `/page/2+/`.
    - `[plu_read_more]`: выводит кнопку со ссылкой на текущую запись цикла Loop (`id`, `text`, `icon`, `class`) в стиле `solid`, `outline` или `link`.
 4. **Zero Bloat CSS и вкладка настроек (`admin.php?page=polylang-up&tab=pagination`):**
    - Выводит компактный инлайн `<style>` с CSS-переменными (`--plu-pg-accent`, `--plu-pg-radius` и др.) однократно за запрос только при фактическом рендере шорткодов.

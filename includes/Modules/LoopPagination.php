@@ -53,6 +53,11 @@ final class LoopPagination {
 	public static ?int $last_loop_per_page = null;
 
 	/**
+	 * Кеш легкого подсчета общего числа записей текущего архива.
+	 */
+	private static ?int $archive_count_cache = null;
+
+	/**
 	 * Флаг однократного вывода инлайн-стилей на странице.
 	 */
 	private static bool $styles_printed = false;
@@ -324,7 +329,7 @@ final class LoopPagination {
 			return;
 		}
 
-		if ( is_admin() || (bool) $query->get( 'suppress_filters' ) ) {
+		if ( is_admin() || (bool) $query->get( 'suppress_filters' ) || (bool) $query->get( '_plu_skip_sync' ) ) {
 			return;
 		}
 
@@ -334,13 +339,14 @@ final class LoopPagination {
 
 		self::$in_pre_get_posts = true;
 		try {
-			// 1. Основной запрос WordPress
+			// 1. Основной запрос WordPress (без ручного offset, чтобы не ломать max_num_pages)
 			if ( $query->is_main_query() ) {
 				if ( $query->is_archive() || $query->is_home() || $query->is_search() ) {
 					$per_page = self::detect_divi_loop_per_page();
 					if ( null !== $per_page && $per_page > 0 ) {
 						$query->set( 'posts_per_page', $per_page );
 					}
+					$query->set( 'no_found_rows', false );
 				}
 				return;
 			}
@@ -916,6 +922,69 @@ final class LoopPagination {
 	}
 
 	/**
+	 * Легкий подсчет общего числа записей текущей рубрики/архива на текущем языке
+	 * (без offset и с paged=1) на случай, если шорткод [plu_pagination] стоит выше цикла Loop.
+	 *
+	 * @return int
+	 */
+	private static function count_archive_found_posts(): int {
+		if ( null !== self::$archive_count_cache ) {
+			return self::$archive_count_cache;
+		}
+
+		if ( ! class_exists( '\WP_Query' ) ) {
+			return 0;
+		}
+
+		$args = [
+			'post_type'      => 'post',
+			'post_status'    => 'publish',
+			'fields'         => 'ids',
+			'posts_per_page' => 1,
+			'paged'          => 1,
+			'no_found_rows'  => false,
+			'_plu_skip_sync' => true,
+		];
+
+		if ( function_exists( 'pll_current_language' ) ) {
+			$lang = (string) pll_current_language( 'slug' );
+			if ( '' !== $lang ) {
+				$args['lang'] = $lang;
+			}
+		}
+
+		if ( is_category() || is_tag() || is_tax() ) {
+			$queried_obj = get_queried_object();
+			if ( $queried_obj instanceof \WP_Term ) {
+				$args['tax_query'] = [
+					[
+						'taxonomy' => $queried_obj->taxonomy,
+						'field'    => 'term_id',
+						'terms'    => [ $queried_obj->term_id ],
+					],
+				];
+			}
+		} elseif ( function_exists( 'is_post_type_archive' ) && is_post_type_archive() ) {
+			$pt = get_query_var( 'post_type' );
+			if ( ! empty( $pt ) ) {
+				$args['post_type'] = $pt;
+			}
+		}
+
+		if ( is_search() && function_exists( 'get_search_query' ) ) {
+			$search = (string) get_search_query( false );
+			if ( '' !== $search ) {
+				$args['s'] = $search;
+			}
+		}
+
+		$count_query               = new \WP_Query( $args );
+		self::$archive_count_cache = max( 0, (int) $count_query->found_posts );
+
+		return self::$archive_count_cache;
+	}
+
+	/**
 	 * Шорткод [plu_pagination] и алиас [scat_pagination].
 	 *
 	 * @param mixed $atts Атрибуты шорткода.
@@ -951,26 +1020,36 @@ final class LoopPagination {
 		// Определяем текущую страницу
 		$current_page = self::get_current_page();
 
-		// Определяем per_page и total_pages (с приоритетом реальных данных отработавшего Divi 5 Loop)
+		// Определяем per_page (приоритет: атрибут -> последний Loop -> авто-детект шаблона -> главный запрос -> опция WP)
 		$custom_per_page = ( '' !== trim( (string) $atts['per_page'] ) ) ? (int) $atts['per_page'] : 0;
-		$found_posts     = self::$last_loop_found_posts ?? ( ( $wp_query instanceof \WP_Query ) ? (int) $wp_query->found_posts : 0 );
+		$query_pp        = ( $wp_query instanceof \WP_Query ) ? (int) $wp_query->get( 'posts_per_page' ) : 0;
 
 		if ( $custom_per_page > 0 ) {
-			$per_page    = $custom_per_page;
-			$total_pages = $found_posts > 0 ? (int) ceil( $found_posts / $per_page ) : 1;
+			$per_page = $custom_per_page;
 		} else {
 			$detected = self::$last_loop_per_page ?? self::detect_divi_loop_per_page();
-			$query_pp = ( $wp_query instanceof \WP_Query ) ? (int) $wp_query->get( 'posts_per_page' ) : 0;
 			$per_page = $detected ?? ( $query_pp > 0 ? $query_pp : (int) get_option( 'posts_per_page', 10 ) );
+		}
+		$per_page = max( 1, $per_page );
 
-			if ( null !== self::$last_loop_found_posts && $per_page > 0 ) {
-				$total_pages = $found_posts > 0 ? (int) ceil( $found_posts / $per_page ) : 1;
-			} else {
-				$total_pages = ( $wp_query instanceof \WP_Query ) ? (int) $wp_query->max_num_pages : 1;
-				if ( $total_pages < 1 && $found_posts > 0 && $per_page > 0 ) {
-					$total_pages = (int) ceil( $found_posts / $per_page );
+		// Определяем общее количество записей (с приоритетом реальных данных отработавшего Divi 5 Loop)
+		if ( null !== self::$last_loop_found_posts && self::$last_loop_found_posts > 0 ) {
+			$found_posts = self::$last_loop_found_posts;
+		} else {
+			$found_posts = ( $wp_query instanceof \WP_Query ) ? (int) $wp_query->found_posts : 0;
+			if ( $found_posts <= 1 && $current_page > 1 ) {
+				$fallback_count = self::count_archive_found_posts();
+				if ( $fallback_count > $found_posts ) {
+					$found_posts = $fallback_count;
 				}
 			}
+		}
+
+		$total_pages = $found_posts > 0 ? (int) ceil( $found_posts / $per_page ) : 1;
+
+		// Железная защита: на /page/2/, /page/3/ и т.д. пагинация никогда не исчезает
+		if ( $current_page > 1 && $total_pages < $current_page ) {
+			$total_pages = $current_page;
 		}
 
 		$is_preview = false;
