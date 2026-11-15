@@ -29,7 +29,19 @@ final class Settings {
             'gemini_api_key'     => '',
             'gemini_model'       => 'gemini-2.5-flash',
             'system_prompt'      => "Ты — профессиональный технический SEO-локализатор для веб-сайтов на WordPress и Divi 5. Переводи тексты точно по смыслу, сохраняя деловой, естественный и экспертный тон целевого языка.\n\nСТРОГИЕ ПРАВИЛА:\n1) Сохраняй все HTML-теги, шорткоды, блоки и параметры Divi 5, URL-адреса, артикулы, числовые значения и переменные Rank Math (%sep%, %sitename%, %title% и др.) без изменений.\n2) При переводе на английский (EN) или другие языки на латинице полностью исключай остаточную кириллицу как в видимом тексте, так и в переводимых атрибутах (alt, title, aria-label, placeholder).\n3) Правила для ключей Rank Math SEO:\n- Для ключа __meta__rank_math_title (SEO Title): емкий SEO-перевод длиной до 55–60 символов (без учета переменных %sep% %sitename%).\n- Для ключа __meta__rank_math_description (Meta Description): привлекательный SEO-перевод длиной до 150–160 символов.\n- Для ключа __meta__rank_math_focus_keyword: точный релевантный поисковый ключ на целевом языке.",
-            'github_token'       => '',
+            'github_token'         => '',
+            'pg_accent_color'      => '#006d77',
+            'pg_active_text_color' => '#ffffff',
+            'pg_bg_color'          => '#ffffff',
+            'pg_text_color'        => '#1e293b',
+            'pg_border_color'      => '#cbd5e1',
+            'pg_border_radius'     => 6,
+            'pg_align'             => 'center',
+            'pg_mid_size'          => 2,
+            'pg_end_size'          => 1,
+            'pg_show_arrows'       => 1,
+            'pg_show_status'       => 1,
+            'rm_style'             => 'outline',
         ];
 
         return $defaults[ $key ] ?? '';
@@ -256,8 +268,45 @@ final class Settings {
      * @return array<string, mixed> Очищенные данные.
      */
     public static function sanitize( mixed $input ): array {
+        $existing = get_option( self::OPTION_NAME, [] );
+        if ( ! is_array( $existing ) ) {
+            $existing = [];
+        }
+
         if ( ! is_array( $input ) ) {
-            return [];
+            return $existing;
+        }
+
+        $tab = sanitize_key( (string) ( $input['_plu_tab'] ?? 'general' ) );
+
+        if ( 'pagination' === $tab ) {
+            $sanitized = [];
+
+            $sanitized['pg_accent_color']      = sanitize_hex_color( (string) ( $input['pg_accent_color'] ?? '' ) ) ?: '#006d77';
+            $sanitized['pg_active_text_color'] = sanitize_hex_color( (string) ( $input['pg_active_text_color'] ?? '' ) ) ?: '#ffffff';
+            $sanitized['pg_bg_color']          = sanitize_hex_color( (string) ( $input['pg_bg_color'] ?? '' ) ) ?: '#ffffff';
+            $sanitized['pg_text_color']        = sanitize_hex_color( (string) ( $input['pg_text_color'] ?? '' ) ) ?: '#1e293b';
+            $sanitized['pg_border_color']      = sanitize_hex_color( (string) ( $input['pg_border_color'] ?? '' ) ) ?: '#cbd5e1';
+
+            $radius = absint( $input['pg_border_radius'] ?? 6 );
+            $sanitized['pg_border_radius'] = max( 0, min( 50, $radius ) );
+
+            $align = sanitize_key( (string) ( $input['pg_align'] ?? 'center' ) );
+            $sanitized['pg_align'] = in_array( $align, [ 'left', 'center', 'right' ], true ) ? $align : 'center';
+
+            $mid_size = absint( $input['pg_mid_size'] ?? 2 );
+            $sanitized['pg_mid_size'] = max( 1, min( 10, $mid_size ) );
+
+            $end_size = absint( $input['pg_end_size'] ?? 1 );
+            $sanitized['pg_end_size'] = max( 1, min( 5, $end_size ) );
+
+            $sanitized['pg_show_arrows'] = ! empty( $input['pg_show_arrows'] ) ? 1 : 0;
+            $sanitized['pg_show_status'] = ! empty( $input['pg_show_status'] ) ? 1 : 0;
+
+            $rm_style = sanitize_key( (string) ( $input['rm_style'] ?? 'outline' ) );
+            $sanitized['rm_style'] = in_array( $rm_style, [ 'solid', 'outline', 'link' ], true ) ? $rm_style : 'outline';
+
+            return array_merge( $existing, $sanitized );
         }
 
         $sanitized = [];
@@ -284,7 +333,7 @@ final class Settings {
         $raw_token = trim( (string) ( $input['github_token'] ?? '' ) );
         $sanitized['github_token'] = preg_replace( '/[^A-Za-z0-9_]/', '', $raw_token ) ?? '';
 
-        return $sanitized;
+        return array_merge( $existing, $sanitized );
     }
 
     public static function render_slug_section_intro(): void {
@@ -923,9 +972,10 @@ final class Settings {
 
         $active_tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( (string) $_GET['tab'] ) ) : 'general';
         $tabs = [
-            'general' => __( 'Основные', 'polyland-up' ),
-            'menus'   => __( '🍔 Дубликатор Меню', 'polyland-up' ),
-            'strings' => __( '🔤 Строки шаблонов (UI)', 'polyland-up' ),
+            'general'    => __( 'Основные', 'polyland-up' ),
+            'menus'      => __( '🍔 Дубликатор Меню', 'polyland-up' ),
+            'strings'    => __( '🔤 Строки шаблонов (UI)', 'polyland-up' ),
+            'pagination' => __( '🔢 Пагинация и Loop', 'polyland-up' ),
         ];
         if ( ! array_key_exists( $active_tab, $tabs ) ) {
             $active_tab = 'general';
@@ -1005,6 +1055,8 @@ final class Settings {
                     <?php \PolylangUp\Modules\MenuDuplicator::render_tab_content(); ?>
                 <?php elseif ( 'strings' === $active_tab ) : ?>
                     <?php \PolylangUp\Modules\StringsManager::render_tab_content(); ?>
+                <?php elseif ( 'pagination' === $active_tab ) : ?>
+                    <?php \PolylangUp\Modules\LoopPagination::render_tab_content(); ?>
                 <?php endif; ?>
             </div>
         </div>

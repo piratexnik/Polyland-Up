@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace PolylangUp\Core;
 
+use PolylangUp\Modules\LoopPagination;
 use PolylangUp\Modules\MenuDuplicator;
 use PolylangUp\Modules\MetaboxUI;
 use PolylangUp\Modules\SameSlug;
@@ -32,8 +33,9 @@ final class Init {
 			MenuDuplicator::init();
 		}
 
-		// Модуль одинаковых слагов и UI-строк работают как в админке, так и на фронтенде
+		// Модули одинаковых слагов, UI-строк и пагинации Loop работают как в админке, так и на фронтенде
 		SameSlug::init();
 		StringsManager::init();
+		LoopPagination::init();
 	}
 }

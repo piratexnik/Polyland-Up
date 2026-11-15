@@ -767,5 +767,78 @@
             });
         }
 
+        // ============================================================
+        // 6. Логика вкладки «🔢 Пагинация и Loop» (Live Preview + Copy)
+        // ============================================================
+        const $pgBox = $('#plu-pagination-admin-box');
+        if ($pgBox.length) {
+            const $preview = $('#plu-pg-live-preview');
+            const $previewWrap = $('#plu-preview-pg-wrap');
+            const $previewStatus = $('#plu-preview-pg-status');
+            const $previewRmBtn = $('#plu-preview-rm-btn');
+
+            // Копирование шорткодов из шпаргалки в 1 клик
+            $pgBox.on('click', '.plu-pg-copy-btn', function(e) {
+                e.preventDefault();
+                const $btn = $(this);
+                const textToCopy = String($btn.attr('data-copy-value') || '');
+                if (!textToCopy) {
+                    return;
+                }
+
+                const markCopied = function() {
+                    const origHtml = $btn.data('orig-html') || $btn.html();
+                    $btn.data('orig-html', origHtml);
+                    $btn.addClass('is-copied').text('✓ Скопировано!');
+                    setTimeout(function() {
+                        $btn.removeClass('is-copied').html(origHtml);
+                    }, 1400);
+                };
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(textToCopy).then(markCopied).catch(function() {});
+                } else {
+                    const $tmp = $('<textarea>').val(textToCopy).appendTo('body').select();
+                    try {
+                        document.execCommand('copy');
+                        markCopied();
+                    } catch (err) {}
+                    $tmp.remove();
+                }
+            });
+
+            // Обновление CSS-переменных Live Preview в реальном времени
+            $pgBox.on('input change', '.plu-pg-live-input', function() {
+                const cssVar = String($(this).attr('data-css-var') || '');
+                const unit = String($(this).attr('data-css-unit') || '');
+                const val = String($(this).val() || '');
+                if (cssVar && $preview.length) {
+                    $preview.get(0).style.setProperty(cssVar, val + unit);
+                }
+            });
+
+            // Выравнивание
+            $('#plu_pg_align').on('change', function() {
+                const align = String($(this).val() || 'center');
+                $previewWrap.removeClass('plu-align-left plu-align-center plu-align-right').addClass('plu-align-' + align);
+            });
+
+            // Стрелки
+            $('#plu_pg_show_arrows').on('change', function() {
+                $pgBox.find('.plu-preview-arrow').toggle($(this).is(':checked'));
+            });
+
+            // Статус
+            $('#plu_pg_show_status').on('change', function() {
+                $previewStatus.toggle($(this).is(':checked'));
+            });
+
+            // Стиль кнопки [plu_read_more]
+            $('#plu_rm_style').on('change', function() {
+                const style = String($(this).val() || 'outline');
+                $previewRmBtn.removeClass('plu-rm-style-solid plu-rm-style-outline plu-rm-style-link').addClass('plu-rm-style-' + style);
+            });
+        }
+
     });
 })(jQuery);

@@ -619,3 +619,193 @@
     color: #7c5400;
 }
 
+/* ========================================================
+ * Loop Pagination Tab & Live Preview
+ * ======================================================== */
+.plu-pg-card {
+    background: #ffffff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    padding: 20px 24px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    margin-bottom: 20px;
+}
+
+.plu-pg-guide-card {
+    border-left: 4px solid #006d77;
+}
+
+.plu-pg-cheatsheet {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.plu-pg-sc-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: #f6f7f7;
+    border: 1px solid #e2e4e7;
+    border-radius: 4px;
+}
+
+.plu-pg-copy-btn {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
+}
+
+.plu-pg-copy-btn code {
+    background: transparent;
+    padding: 0;
+    color: #135e96;
+}
+
+.plu-pg-copy-btn.is-copied {
+    background: #edfaef !important;
+    border-color: #46b450 !important;
+    color: #1a7a28 !important;
+}
+
+.plu-pg-sc-desc {
+    font-size: 12.5px;
+    color: #50575e;
+}
+
+.plu-pg-live-preview {
+    padding: 20px;
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 6px;
+}
+
+.plu-pg-live-preview .plu-pagination-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0 0 18px;
+    width: 100%;
+}
+
+.plu-pg-live-preview .plu-pagination-wrap.plu-align-left {
+    align-items: flex-start;
+}
+
+.plu-pg-live-preview .plu-pagination-wrap.plu-align-center {
+    align-items: center;
+}
+
+.plu-pg-live-preview .plu-pagination-wrap.plu-align-right {
+    align-items: flex-end;
+}
+
+.plu-pg-live-preview .plu-pagination-status {
+    font-size: 13px;
+    color: var(--plu-pg-text);
+    opacity: 0.78;
+    font-weight: 500;
+}
+
+.plu-pg-live-preview .plu-pagination-list {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.plu-pg-live-preview .plu-page-item {
+    margin: 0;
+    padding: 0;
+}
+
+.plu-pg-live-preview .plu-page-item .page-numbers {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 38px;
+    height: 38px;
+    padding: 0 12px;
+    border-radius: var(--plu-pg-radius);
+    background: var(--plu-pg-bg);
+    color: var(--plu-pg-text);
+    border: 1px solid var(--plu-pg-border);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    transition: all 0.18s ease;
+    box-sizing: border-box;
+}
+
+.plu-pg-live-preview .plu-page-item a.page-numbers:hover {
+    background: var(--plu-pg-accent);
+    color: var(--plu-pg-active-text);
+    border-color: var(--plu-pg-accent);
+}
+
+.plu-pg-live-preview .plu-page-item .page-numbers.current {
+    background: var(--plu-pg-accent);
+    color: var(--plu-pg-active-text);
+    border-color: var(--plu-pg-accent);
+}
+
+.plu-pg-live-preview .plu-page-item .page-numbers.dots {
+    background: transparent;
+    border-color: transparent;
+    min-width: auto;
+    padding: 0 4px;
+}
+
+.plu-preview-rm-box {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 14px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.plu-pg-live-preview .plu-read-more-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 18px;
+    border-radius: var(--plu-pg-radius);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: none;
+    transition: all 0.18s ease;
+    box-sizing: border-box;
+}
+
+.plu-pg-live-preview .plu-rm-style-solid {
+    background: var(--plu-pg-accent);
+    color: var(--plu-pg-active-text);
+    border: 1px solid var(--plu-pg-accent);
+}
+
+.plu-pg-live-preview .plu-rm-style-outline {
+    background: transparent;
+    color: var(--plu-pg-accent);
+    border: 1px solid var(--plu-pg-accent);
+}
+
+.plu-pg-live-preview .plu-rm-style-outline:hover {
+    background: var(--plu-pg-accent);
+    color: var(--plu-pg-active-text);
+}
+
+.plu-pg-live-preview .plu-rm-style-link {
+    background: transparent;
+    color: var(--plu-pg-accent);
+    border: 1px solid transparent;
+    padding-left: 0;
+    padding-right: 0;
+}

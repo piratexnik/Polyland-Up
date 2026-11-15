@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `2.8`
+- **Текущая версия:** `2.9`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -37,11 +37,12 @@ Polyland-Up/
         ├── TranslatorAPI.php # Шлюз Google Translate GTX и Gemini API (Этап 5)
         ├── LinkRewriter.php  # Умная перелинковка внутренних ссылок (Этап 6)
         ├── MenuDuplicator.php # AI Дубликатор и Переводчик Меню WordPress / Polylang
-        └── StringsManager.php # UI-Строки для шаблонов Divi 5 Theme Builder
+        ├── StringsManager.php # UI-Строки для шаблонов Divi 5 Theme Builder
+        └── LoopPagination.php # Мультиязычная пагинация и кнопки для Divi 5 Loop
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '2.8'
+- `PLU_VERSION` — '2.9'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -256,5 +257,20 @@ if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() )
    - Сохраняет иерархию подменю (`_menu_item_menu_item_parent`), классы Divi, кастомные мета-поля (через `wp_slash()`) и переключатель языков `#pll_switcher`.
 3. **Авто-привязка к областям темы:**
    - Находит области темы исходного меню (в `polylang['nav_menus']` и `get_nav_menu_locations()`) и автоматически регистрирует созданное меню для целевого языка в опции `polylang`.
+
+---
+
+## 14. Мультиязычная Пагинация и Кнопки для Divi 5 Loop (`LoopPagination.php`)
+Обеспечивает единый дизайн и корректную пагинацию для архивов и циклов Divi 5 Theme Builder:
+1. **Авто-детект `per_page` и защита от 404 (`detect_divi_loop_per_page()` + `pre_get_posts`):**
+   - Находит активный макет `et_body_layout` через `et_theme_builder_get_template_layouts()` или метаданные `_et_theme_builder` / `_et_template` / `_et_body_layout_id`.
+   - Сканирует JSON-атрибуты блоков Divi 5 с включенным Loop (`loop -> enable -> desktop -> value === 'on'` или модули Blog/Post) и шорткоды Divi 4 на ключи `posts_per_page`, `postsPerPage`, `post_number`, `posts_number`, `postsNumber`.
+   - Синхронизирует `posts_per_page` основного `WP_Query` на хуке `pre_get_posts` (с защитой от рекурсии), исключая 404 на дальних страницах (`/page/40/`, `/page/66/`).
+2. **Шорткоды:**
+   - `[plu_pagination]` (алиас `[scat_pagination]`): поддерживает атрибуты `per_page`, `mid_size`, `end_size`, `show_arrows`, `show_status`, `align`, мультиязычные строки (`pagination_prev`, `pagination_next`, `pagination_status` из `StringsManager`) и демонстрационный макет в Divi Visual Builder.
+   - `[plu_read_more]`: выводит кнопку со ссылкой на текущую запись цикла Loop (`id`, `text`, `icon`, `class`) в стиле `solid`, `outline` или `link`.
+3. **Zero Bloat CSS и вкладка настроек (`admin.php?page=polylang-up&tab=pagination`):**
+   - Выводит компактный инлайн `<style>` с CSS-переменными (`--plu-pg-accent`, `--plu-pg-radius` и др.) однократно за запрос только при фактическом рендере шорткодов.
+   - Вкладка админки содержит шпаргалку с копированием в 1 клик, интерактивное Live Preview и форму настроек дизайна в `plu_settings`.
 
 

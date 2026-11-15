@@ -120,6 +120,21 @@ final class StringsManager {
 				'en' => 'Categories:',
 				'ru' => 'Категории:',
 			],
+			'pagination_prev' => [
+				'uk' => '« Попередня',
+				'en' => '« Previous',
+				'ru' => '« Предыдущая',
+			],
+			'pagination_next' => [
+				'uk' => 'Наступна »',
+				'en' => 'Next »',
+				'ru' => 'Следующая »',
+			],
+			'pagination_status' => [
+				'uk' => 'Сторінка %1$d з %2$d',
+				'en' => 'Page %1$d of %2$d',
+				'ru' => 'Страница %1$d из %2$d',
+			],
 		];
 
 		// Адаптируем ключи под реальные слаги языков Polylang (например, ua -> uk)

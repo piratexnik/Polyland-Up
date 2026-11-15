@@ -19,6 +19,7 @@
   - `includes/Modules/LinkRewriter.php` — Умная перелинковка внутренних ссылок.
   - `includes/Modules/MenuDuplicator.php` — Модуль дублирования и перевода меню WordPress / Polylang.
   - `includes/Modules/StringsManager.php` — Модуль мультиязычных UI-строк для шаблонов Divi 5 Theme Builder (`[plu_str]`, `[plu_date]`, виртуальные мета-ключи `plu_str_{id}`).
+  - `includes/Modules/LoopPagination.php` — Модуль мультиязычной пагинации и кнопок для Divi 5 Loop (`[plu_pagination]`, `[scat_pagination]`, `[plu_read_more]`, `pre_get_posts`).
 - `assets/js/admin.js`, `assets/css/admin.css` — Ассеты админки.
 - `DOCS.md` — Технический паспорт проекта и архитектурная документация.
 
