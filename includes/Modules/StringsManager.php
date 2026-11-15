@@ -1,0 +1,987 @@
+<?php
+declare(strict_types=1);
+
+namespace PolylangUp\Modules;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+/**
+ * Модуль «🔤 UI-Строки для шаблонов Divi 5 Theme Builder».
+ *
+ * Позволяет использовать один общий шаблон Divi 5 Theme Builder для всех языков Polylang
+ * через шорткоды [plu_str], [plu_date] и виртуальные мета-ключи plu_str_{id}
+ * без засорения wp_postmeta и с нулевыми дополнительными запросами к БД.
+ */
+final class StringsManager {
+
+	public const OPTION_NAME      = 'plu_ui_strings';
+	public const REF_POST_OPTION  = 'plu_ui_strings_ref_post_id';
+	public const PLL_GROUP        = 'Polylang AI UI';
+	public const META_PREFIX      = 'plu_str_';
+
+	/**
+	 * Статический кеш словаря UI-строк в RAM.
+	 *
+	 * @var array<string, array<string, string>>|null
+	 */
+	private static ?array $strings_cache = null;
+
+	/**
+	 * Флаг временного отключения перехвата get_post_metadata при синхронизации эталонного поста.
+	 */
+	private static bool $bypass_meta_filter = false;
+
+	/**
+	 * Инициализация хуков модуля (фронтенд + админка).
+	 */
+	public static function init(): void {
+		// Регистрация строк в Polylang и гарантированная инициализация словаря
+		add_action( 'init', [ self::class, 'register_polylang_strings' ], 20 );
+
+		// Шорткоды для Divi 5 Theme Builder и Loop
+		add_shortcode( 'plu_str', [ self::class, 'render_shortcode_str' ] );
+		add_shortcode( 'plu_date', [ self::class, 'render_shortcode_date' ] );
+
+		// Гарантированное раскрытие шорткодов внутри модулей и блоков Divi 5
+		add_filter( 'et_pb_module_content', [ self::class, 'process_divi_shortcodes' ], 20 );
+		add_filter( 'et_module_shortcode_output', [ self::class, 'process_divi_shortcodes' ], 20 );
+		add_filter( 'render_block', [ self::class, 'process_divi_shortcodes' ], 20 );
+
+		// Виртуальные мета-ключи plu_str_{id} для Dynamic Content (бочонок) в Divi 5
+		add_filter( 'get_post_metadata', [ self::class, 'filter_virtual_post_metadata' ], 10, 4 );
+		add_filter( 'postmeta_form_keys', [ self::class, 'filter_postmeta_form_keys' ], 10, 2 );
+		add_filter( 'et_builder_custom_fields', [ self::class, 'filter_divi_custom_fields' ], 10 );
+
+		// Сброс статического кеша при обновлении опции
+		add_action( 'update_option_' . self::OPTION_NAME, [ self::class, 'reset_cache' ] );
+
+		// Админ-обработчики (сохранение и AI-перевод)
+		if ( is_admin() ) {
+			add_action( 'wp_ajax_plu_save_ui_strings', [ self::class, 'ajax_save_ui_strings' ] );
+			add_action( 'wp_ajax_plu_translate_ui_strings', [ self::class, 'ajax_translate_ui_strings' ] );
+		}
+	}
+
+	/**
+	 * Сброс статического кеша в памяти.
+	 */
+	public static function reset_cache(): void {
+		self::$strings_cache = null;
+	}
+
+	/**
+	 * Стартовый предзаполненный словарь UI-строк для шаблонов.
+	 *
+	 * @return array<string, array<string, string>>
+	 */
+	public static function get_default_presets(): array {
+		$base = [
+			'read_more' => [
+				'uk' => 'Читати далі',
+				'en' => 'Read more',
+				'ru' => 'Читать далее',
+			],
+			'home' => [
+				'uk' => 'Головна',
+				'en' => 'Home',
+				'ru' => 'Главная',
+			],
+			'published_on' => [
+				'uk' => 'Опубліковано:',
+				'en' => 'Published on:',
+				'ru' => 'Опубликовано:',
+			],
+			'updated_on' => [
+				'uk' => 'Оновлено:',
+				'en' => 'Updated on:',
+				'ru' => 'Обновлено:',
+			],
+			'all_news' => [
+				'uk' => 'Всі новини',
+				'en' => 'All news',
+				'ru' => 'Все новости',
+			],
+			'back_to_list' => [
+				'uk' => 'Назад до списку',
+				'en' => 'Back to list',
+				'ru' => 'Назад к списку',
+			],
+			'search_placeholder' => [
+				'uk' => 'Пошук...',
+				'en' => 'Search...',
+				'ru' => 'Поиск...',
+			],
+			'no_results' => [
+				'uk' => 'За вашим запитом нічого не знайдено',
+				'en' => 'No results found',
+				'ru' => 'По вашему запросу ничего не найдено',
+			],
+			'share' => [
+				'uk' => 'Поділитися:',
+				'en' => 'Share:',
+				'ru' => 'Поделиться:',
+			],
+			'categories' => [
+				'uk' => 'Категорії:',
+				'en' => 'Categories:',
+				'ru' => 'Категории:',
+			],
+		];
+
+		// Адаптируем ключи под реальные слаги языков Polylang (например, ua -> uk)
+		$lang_slugs = self::get_polylang_slugs();
+		if ( empty( $lang_slugs ) ) {
+			return $base;
+		}
+
+		$result = [];
+		foreach ( $base as $key => $translations ) {
+			$row = [];
+			foreach ( $lang_slugs as $slug ) {
+				if ( isset( $translations[ $slug ] ) ) {
+					$row[ $slug ] = $translations[ $slug ];
+				} elseif ( 'ua' === $slug && isset( $translations['uk'] ) ) {
+					$row[ $slug ] = $translations['uk'];
+				} else {
+					$row[ $slug ] = '';
+				}
+			}
+			// Сохраняем базовые ключи на случай, если язык добавят позже
+			foreach ( $translations as $k => $v ) {
+				if ( ! array_key_exists( $k, $row ) && ( 'uk' !== $k || ! in_array( 'ua', $lang_slugs, true ) ) ) {
+					$row[ $k ] = $v;
+				}
+			}
+			$result[ $key ] = $row;
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Получение всех UI-строк из опции plu_ui_strings со статическим кешированием в RAM.
+	 * При первом запуске предзаполняет стартовый набор.
+	 *
+	 * @param bool $reset Принудительно перечитать из БД.
+	 * @return array<string, array<string, string>>
+	 */
+	public static function get_strings( bool $reset = false ): array {
+		if ( ! $reset && null !== self::$strings_cache ) {
+			return self::$strings_cache;
+		}
+
+		$raw = get_option( self::OPTION_NAME, false );
+
+		if ( false === $raw || ! is_array( $raw ) ) {
+			$defaults = self::get_default_presets();
+			update_option( self::OPTION_NAME, $defaults, true );
+			self::$strings_cache = $defaults;
+
+			// Синхронизируем эталонные ключи для Divi 5 при первой инициализации
+			if ( is_admin() ) {
+				self::sync_reference_post_meta( $defaults );
+			}
+
+			return self::$strings_cache;
+		}
+
+		$clean = [];
+		foreach ( $raw as $key => $langs ) {
+			$clean_key = self::sanitize_string_id( (string) $key );
+			if ( '' === $clean_key || ! is_array( $langs ) ) {
+				continue;
+			}
+			$clean[ $clean_key ] = [];
+			foreach ( $langs as $lang_slug => $val ) {
+				$clean_lang = sanitize_key( (string) $lang_slug );
+				if ( '' !== $clean_lang ) {
+					$clean[ $clean_key ][ $clean_lang ] = (string) $val;
+				}
+			}
+		}
+
+		self::$strings_cache = $clean;
+		return self::$strings_cache;
+	}
+
+	/**
+	 * Получение слагов всех активных языков Polylang.
+	 *
+	 * @return array<int, string>
+	 */
+	public static function get_polylang_slugs(): array {
+		if ( ! function_exists( 'pll_languages_list' ) ) {
+			return [];
+		}
+
+		$slugs = pll_languages_list( [ 'fields' => 'slug' ] );
+		if ( ! is_array( $slugs ) ) {
+			return [];
+		}
+
+		return array_values( array_filter( array_map( 'sanitize_key', $slugs ) ) );
+	}
+
+	/**
+	 * Получение полных объектов языков Polylang (динамический список колонок).
+	 *
+	 * @return array<int, object>
+	 */
+	public static function get_polylang_languages(): array {
+		if ( ! function_exists( 'pll_languages_list' ) ) {
+			return [];
+		}
+
+		$langs = pll_languages_list( [ 'fields' => '' ] );
+		if ( ! is_array( $langs ) ) {
+			return [];
+		}
+
+		return array_values( array_filter( $langs, static fn( mixed $item ): bool => is_object( $item ) && ! empty( $item->slug ) ) );
+	}
+
+	/**
+	 * Определение текущего языка страницы (pll_current_language с фоллбэком по URL и default).
+	 *
+	 * @return string
+	 */
+	public static function get_current_lang_slug(): string {
+		if ( function_exists( 'pll_current_language' ) ) {
+			$current = pll_current_language( 'slug' );
+			if ( is_string( $current ) && '' !== $current ) {
+				return sanitize_key( $current );
+			}
+		}
+
+		// Фоллбэк: определение по первому сегменту URL (для нестандартных контекстов / Theme Builder)
+		$valid_slugs = self::get_polylang_slugs();
+		if ( ! empty( $valid_slugs ) && ! empty( $_SERVER['REQUEST_URI'] ) ) {
+			$request_path = (string) parse_url( wp_unslash( (string) $_SERVER['REQUEST_URI'] ), PHP_URL_PATH );
+			$home_path    = (string) parse_url( home_url( '/' ), PHP_URL_PATH );
+			$relative     = trim( substr( $request_path, strlen( rtrim( $home_path, '/' ) ) ), '/' );
+			$segments     = '' !== $relative ? explode( '/', $relative ) : [];
+
+			if ( ! empty( $segments[0] ) ) {
+				$candidate = sanitize_key( $segments[0] );
+				if ( in_array( $candidate, $valid_slugs, true ) ) {
+					return $candidate;
+				}
+			}
+		}
+
+		if ( function_exists( 'pll_default_language' ) ) {
+			$default = pll_default_language( 'slug' );
+			if ( is_string( $default ) && '' !== $default ) {
+				return sanitize_key( $default );
+			}
+		}
+
+		return ! empty( $valid_slugs ) ? $valid_slugs[0] : 'uk';
+	}
+
+	/**
+	 * Получение перевода UI-строки по ключу из статического кеша (0 запросов к БД).
+	 *
+	 * @param string $id      Идентификатор строки (например, 'read_more').
+	 * @param string $default Значение по умолчанию, если перевод не найден.
+	 * @param string $lang    Код языка (если пустой — определяется автоматически).
+	 * @return string
+	 */
+	public static function get_string( string $id, string $default = '', string $lang = '' ): string {
+		$clean_id = self::sanitize_string_id( $id );
+		if ( '' === $clean_id ) {
+			return $default;
+		}
+
+		$strings = self::get_strings();
+		if ( ! isset( $strings[ $clean_id ] ) ) {
+			return $default;
+		}
+
+		$row  = $strings[ $clean_id ];
+		$lang = '' !== $lang ? sanitize_key( $lang ) : self::get_current_lang_slug();
+
+		// 1. Прямое совпадение для текущего языка
+		if ( isset( $row[ $lang ] ) && '' !== trim( $row[ $lang ] ) ) {
+			return $row[ $lang ];
+		}
+
+		// 2. Синоним uk <-> ua
+		if ( 'ua' === $lang && isset( $row['uk'] ) && '' !== trim( $row['uk'] ) ) {
+			return $row['uk'];
+		}
+		if ( 'uk' === $lang && isset( $row['ua'] ) && '' !== trim( $row['ua'] ) ) {
+			return $row['ua'];
+		}
+
+		// 3. Фоллбэк на язык по умолчанию Polylang
+		$def_lang = function_exists( 'pll_default_language' ) ? sanitize_key( (string) pll_default_language( 'slug' ) ) : '';
+		if ( '' !== $def_lang && isset( $row[ $def_lang ] ) && '' !== trim( $row[ $def_lang ] ) ) {
+			return $row[ $def_lang ];
+		}
+
+		// 4. Атрибут default, если передан
+		if ( '' !== $default ) {
+			return $default;
+		}
+
+		// 5. Первое непустое значение из других языков
+		foreach ( $row as $val ) {
+			if ( '' !== trim( (string) $val ) ) {
+				return (string) $val;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Регистрация всех UI-строк в нативном реестре Polylang (Мови -> Переклади).
+	 */
+	public static function register_polylang_strings(): void {
+		if ( ! function_exists( 'pll_register_string' ) ) {
+			return;
+		}
+
+		$strings  = self::get_strings();
+		$def_lang = function_exists( 'pll_default_language' ) ? sanitize_key( (string) pll_default_language( 'slug' ) ) : 'uk';
+
+		foreach ( $strings as $key => $row ) {
+			$default_val = '';
+			if ( isset( $row[ $def_lang ] ) && '' !== trim( $row[ $def_lang ] ) ) {
+				$default_val = $row[ $def_lang ];
+			} else {
+				foreach ( $row as $val ) {
+					if ( '' !== trim( (string) $val ) ) {
+						$default_val = (string) $val;
+						break;
+					}
+				}
+			}
+
+			if ( '' !== $default_val ) {
+				pll_register_string( $key, $default_val, self::PLL_GROUP );
+			}
+		}
+	}
+
+	/**
+	 * Шорткод [plu_str id="read_more" before="" after="" default=""].
+	 *
+	 * @param array<string, string>|string $atts Атрибуты шорткода.
+	 * @return string
+	 */
+	public static function render_shortcode_str( array|string $atts ): string {
+		$atts = shortcode_atts(
+			[
+				'id'      => '',
+				'before'  => '',
+				'after'   => '',
+				'default' => '',
+			],
+			is_array( $atts ) ? $atts : [],
+			'plu_str'
+		);
+
+		$id = self::sanitize_string_id( (string) $atts['id'] );
+		if ( '' === $id ) {
+			return '';
+		}
+
+		$translated = self::get_string( $id, (string) $atts['default'] );
+		if ( '' === $translated ) {
+			return '';
+		}
+
+		return esc_html( (string) $atts['before'] . $translated . (string) $atts['after'] );
+	}
+
+	/**
+	 * Бонусный шорткод мультиязычной даты [plu_date format="l, j F Y"].
+	 *
+	 * @param array<string, string>|string $atts Атрибуты шорткода.
+	 * @return string
+	 */
+	public static function render_shortcode_date( array|string $atts ): string {
+		$atts = shortcode_atts(
+			[
+				'format' => 'l, j F Y',
+			],
+			is_array( $atts ) ? $atts : [],
+			'plu_date'
+		);
+
+		$format = (string) $atts['format'];
+		if ( '' === trim( $format ) ) {
+			$format = 'l, j F Y';
+		}
+
+		return esc_html( (string) wp_date( $format ) );
+	}
+
+	/**
+	 * Гарантированное раскрытие шорткодов [plu_str] и [plu_date] в модулях и блоках Divi 5.
+	 *
+	 * @param mixed $output HTML-вывод модуля/блока.
+	 * @return mixed
+	 */
+	public static function process_divi_shortcodes( mixed $output ): mixed {
+		if ( ! is_string( $output ) || ! str_contains( $output, '[plu_' ) ) {
+			return $output;
+		}
+
+		return do_shortcode( $output );
+	}
+
+	/**
+	 * Перехват get_post_metadata для виртуальных ключей plu_str_{id}.
+	 * На фронтенде отдает перевод мгновенно из статического кеша без запросов в wp_postmeta.
+	 *
+	 * @param mixed $value     Текущее значение фильтра (обычно null).
+	 * @param mixed $object_id ID записи.
+	 * @param mixed $meta_key  Имя мета-ключа.
+	 * @param mixed $single    Одиночное значение или массив.
+	 * @return mixed
+	 */
+	public static function filter_virtual_post_metadata( mixed $value, mixed $object_id, mixed $meta_key, mixed $single ): mixed {
+		if ( self::$bypass_meta_filter ) {
+			return $value;
+		}
+
+		if ( ! is_string( $meta_key ) || ! str_starts_with( $meta_key, self::META_PREFIX ) ) {
+			return $value;
+		}
+
+		$str_id = substr( $meta_key, strlen( self::META_PREFIX ) );
+		if ( '' === $str_id ) {
+			return $value;
+		}
+
+		$translated = self::get_string( $str_id );
+
+		return $single ? $translated : [ $translated ];
+	}
+
+	/**
+	 * Инжекция виртуальных ключей plu_str_{id} в стандартный список мета-ключей WordPress (postmeta_form_keys).
+	 *
+	 * @param mixed $keys Массив существующих ключей.
+	 * @param mixed $post Текущий объект WP_Post.
+	 * @return mixed
+	 */
+	public static function filter_postmeta_form_keys( mixed $keys, mixed $post ): mixed {
+		if ( ! is_array( $keys ) ) {
+			$keys = [];
+		}
+
+		foreach ( array_keys( self::get_strings() ) as $str_id ) {
+			$meta_key = self::META_PREFIX . $str_id;
+			if ( ! in_array( $meta_key, $keys, true ) ) {
+				$keys[] = $meta_key;
+			}
+		}
+
+		return $keys;
+	}
+
+	/**
+	 * Инжекция виртуальных ключей plu_str_{id} в список кастомных полей конструктора Divi.
+	 *
+	 * @param mixed $fields Список полей.
+	 * @return mixed
+	 */
+	public static function filter_divi_custom_fields( mixed $fields ): mixed {
+		if ( ! is_array( $fields ) ) {
+			return $fields;
+		}
+
+		foreach ( array_keys( self::get_strings() ) as $str_id ) {
+			$meta_key = self::META_PREFIX . $str_id;
+			if ( ! array_key_exists( $meta_key, $fields ) ) {
+				$fields[ $meta_key ] = $meta_key;
+			}
+		}
+
+		return $fields;
+	}
+
+	/**
+	 * Синхронизация эталонных мета-ключей plu_str_{id} на одной главной/первой записи в БД,
+	 * чтобы SQL-запрос `SELECT DISTINCT meta_key FROM wp_postmeta` в Divi 5 видел все ключи
+	 * в выпадающем списке Dynamic Content -> Custom Field без засорения остальных постов.
+	 *
+	 * @param array<string, array<string, string>> $strings Словарь UI-строк.
+	 */
+	public static function sync_reference_post_meta( array $strings ): void {
+		global $wpdb;
+
+		if ( ! isset( $wpdb ) || ! ( $wpdb instanceof \wpdb ) ) {
+			return;
+		}
+
+		$ref_post_id = (int) get_option( self::REF_POST_OPTION, 0 );
+		if ( $ref_post_id > 0 ) {
+			$exists = $wpdb->get_var(
+				$wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID = %d LIMIT 1", $ref_post_id )
+			);
+			if ( ! $exists ) {
+				$ref_post_id = 0;
+			}
+		}
+
+		if ( $ref_post_id <= 0 ) {
+			$front_page_id = (int) get_option( 'page_on_front', 0 );
+			if ( $front_page_id > 0 ) {
+				$ref_post_id = $front_page_id;
+			} else {
+				$ref_post_id = (int) $wpdb->get_var(
+					"SELECT ID FROM {$wpdb->posts} WHERE post_type IN ('page', 'post') AND post_status IN ('publish', 'draft', 'private') ORDER BY ID ASC LIMIT 1"
+				);
+			}
+
+			if ( $ref_post_id > 0 ) {
+				update_option( self::REF_POST_OPTION, $ref_post_id, false );
+			}
+		}
+
+		if ( $ref_post_id <= 0 ) {
+			return;
+		}
+
+		self::$bypass_meta_filter = true;
+		try {
+			// Удаляем устаревшие эталонные ключи plu_str_* у опорного поста
+			$like_pattern = $wpdb->esc_like( self::META_PREFIX ) . '%';
+			$wpdb->query(
+				$wpdb->prepare(
+					"DELETE FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s",
+					$ref_post_id,
+					$like_pattern
+				)
+			);
+
+			// Записываем актуальные ключи (по 1 записи на ключ)
+			foreach ( array_keys( $strings ) as $str_id ) {
+				$clean_id = self::sanitize_string_id( (string) $str_id );
+				if ( '' !== $clean_id ) {
+					update_post_meta( $ref_post_id, self::META_PREFIX . $clean_id, $clean_id );
+				}
+			}
+
+			wp_cache_delete( $ref_post_id, 'post_meta' );
+		} finally {
+			self::$bypass_meta_filter = false;
+		}
+	}
+
+	/**
+	 * Санитизация ID строки (строго латиница, цифры, underscore в snake_case).
+	 *
+	 * @param string $raw_id Исходный ID.
+	 * @return string
+	 */
+	public static function sanitize_string_id( string $raw_id ): string {
+		$id = strtolower( trim( $raw_id ) );
+		$id = str_replace( '-', '_', $id );
+		$id = (string) preg_replace( '/[^a-z0-9_]/', '', $id );
+		$id = (string) preg_replace( '/_+/', '_', $id );
+		return trim( $id, '_' );
+	}
+
+	/**
+	 * Отрисовка интерфейса вкладки «🔤 Строки шаблонов (UI)».
+	 */
+	public static function render_tab_content(): void {
+		$languages = self::get_polylang_languages();
+		$strings   = self::get_strings();
+
+		// Если Polylang не активен, формируем базовые колонки по умолчанию, чтобы интерфейс не падал
+		$lang_cols = [];
+		if ( ! empty( $languages ) ) {
+			foreach ( $languages as $lang ) {
+				$slug        = sanitize_key( (string) $lang->slug );
+				$name        = (string) ( $lang->name ?? strtoupper( $slug ) );
+				$flag        = (string) ( $lang->flag ?? '' );
+				$lang_cols[] = [
+					'slug' => $slug,
+					'name' => $name,
+					'flag' => $flag,
+				];
+			}
+		} else {
+			$lang_cols = [
+				[ 'slug' => 'uk', 'name' => 'Українська', 'flag' => '' ],
+				[ 'slug' => 'en', 'name' => 'English', 'flag' => '' ],
+				[ 'slug' => 'ru', 'name' => 'Русский', 'flag' => '' ],
+			];
+		}
+
+		$default_translator = (string) plu_get_option( 'default_translator', 'gtx' );
+		$engine_label       = 'gemini' === $default_translator ? 'Google Gemini AI' : 'Google Translate (Free GTX)';
+		?>
+		<div class="plu-strings-manager-wrap" id="plu-strings-manager-box">
+			<!-- Блок подробной инструкции-памятки -->
+			<div class="plu-strings-guide-card">
+				<h2 style="margin-top:0;">
+					<?php esc_html_e( '🔤 UI-Строки для шаблонов Divi 5 Theme Builder', 'polyland-up' ); ?>
+				</h2>
+				<p class="description" style="font-size:13px; margin-bottom:14px;">
+					<?php esc_html_e( 'Используйте один общий шаблон в Divi 5 Theme Builder (архивы новостей, карточки цикла Loop, шапка, подвал, хлебные крошки, 404) сразу для всех языков Polylang — без дублирования шаблонов и без засорения wp_postmeta.', 'polyland-up' ); ?>
+				</p>
+
+				<div class="plu-guide-grid">
+					<div class="plu-guide-item">
+						<div class="plu-guide-title">
+							<?php esc_html_e( 'Вариант А: Шорткод в любом тексте, заголовке или кнопке Divi 5', 'polyland-up' ); ?>
+						</div>
+						<p>
+							<?php esc_html_e( 'Вставьте шорткод в текстовый модуль, кнопку или заголовок:', 'polyland-up' ); ?>
+						</p>
+						<code>[plu_str id="read_more"]</code>
+						<div class="plu-guide-sub">
+							<?php esc_html_e( 'С необязательным префиксом/суффиксом:', 'polyland-up' ); ?>
+							<code>[plu_str id="updated_on" after=" "]</code>
+						</div>
+					</div>
+
+					<div class="plu-guide-item">
+						<div class="plu-guide-title">
+							<?php esc_html_e( 'Вариант Б: Иконка бочонка Dynamic Content 🛢 → Custom Field', 'polyland-up' ); ?>
+						</div>
+						<p>
+							<?php esc_html_e( 'В шаблонах Theme Builder и циклах Loop выберите Dynamic Content → Custom Field и укажите ключ из списка:', 'polyland-up' ); ?>
+						</p>
+						<code>plu_str_read_more</code>
+						<div class="plu-guide-sub">
+							<?php esc_html_e( 'Значение подставляется виртуально из RAM (0 запросов к БД).', 'polyland-up' ); ?>
+						</div>
+					</div>
+
+					<div class="plu-guide-item">
+						<div class="plu-guide-title">
+							<?php esc_html_e( 'Вариант В: Мультиязычная дата в шапке или мета-данных', 'polyland-up' ); ?>
+						</div>
+						<p>
+							<?php esc_html_e( 'Выводит текущую дату согласно активной локали Polylang:', 'polyland-up' ); ?>
+						</p>
+						<code>[plu_date format="l, j F Y"]</code>
+						<div class="plu-guide-sub">
+							<?php esc_html_e( 'Пример: «Неділя, 15 листопада 2026» / «Sunday, November 15, 2026».', 'polyland-up' ); ?>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Панель управления таблицей -->
+			<div class="plu-strings-table-card">
+				<div class="plu-strings-toolbar">
+					<div>
+						<strong><?php esc_html_e( 'Словарь интерфейсных строк', 'polyland-up' ); ?></strong>
+						<span class="description" style="margin-left:8px;">
+							<?php
+							printf(
+								esc_html__( 'Текущий движок AI-перевода: %s (настраивается во вкладке «Основные»).', 'polyland-up' ),
+								'<strong>' . esc_html( $engine_label ) . '</strong>'
+							);
+							?>
+						</span>
+					</div>
+				</div>
+
+				<div class="plu-strings-table-scroll">
+					<table
+						class="widefat striped plu-strings-table"
+						id="plu-strings-table"
+						data-langs="<?php echo esc_attr( (string) wp_json_encode( $lang_cols ) ); ?>"
+					>
+						<thead>
+							<tr>
+								<th class="plu-col-id"><?php esc_html_e( 'ID ключа (snake_case)', 'polyland-up' ); ?></th>
+								<th class="plu-col-copy"><?php esc_html_e( 'Быстрое копирование для Divi 5', 'polyland-up' ); ?></th>
+								<?php foreach ( $lang_cols as $col ) : ?>
+									<th class="plu-col-lang">
+										<?php if ( '' !== $col['flag'] ) : ?>
+											<span class="plu-th-flag"><?php echo wp_kses_post( $col['flag'] ); ?></span>
+										<?php endif; ?>
+										<?php echo esc_html( $col['name'] ); ?>
+										<span class="plu-th-slug">(<?php echo esc_html( $col['slug'] ); ?>)</span>
+									</th>
+								<?php endforeach; ?>
+								<th class="plu-col-actions"><?php esc_html_e( 'Удалить', 'polyland-up' ); ?></th>
+							</tr>
+						</thead>
+						<tbody id="plu-strings-tbody">
+							<?php foreach ( $strings as $str_id => $row ) : ?>
+								<tr class="plu-string-row">
+									<td>
+										<input
+											type="text"
+											class="regular-text plu-str-id-input"
+											value="<?php echo esc_attr( $str_id ); ?>"
+											placeholder="read_more"
+										/>
+									</td>
+									<td>
+										<div class="plu-copy-badges">
+											<button
+												type="button"
+												class="button button-small plu-copy-badge"
+												data-copy-type="shortcode"
+												data-copy-value="<?php echo esc_attr( '[plu_str id="' . $str_id . '"]' ); ?>"
+												title="<?php esc_attr_e( 'Копировать шорткод', 'polyland-up' ); ?>"
+											>
+												&#128203; <code>[plu_str id="<?php echo esc_html( $str_id ); ?>"]</code>
+											</button>
+											<button
+												type="button"
+												class="button button-small plu-copy-badge"
+												data-copy-type="meta"
+												data-copy-value="<?php echo esc_attr( self::META_PREFIX . $str_id ); ?>"
+												title="<?php esc_attr_e( 'Копировать мета-ключ для Dynamic Content', 'polyland-up' ); ?>"
+											>
+												&#128203; <code><?php echo esc_html( self::META_PREFIX . $str_id ); ?></code>
+											</button>
+										</div>
+									</td>
+									<?php foreach ( $lang_cols as $col ) : ?>
+										<?php
+										$slug = $col['slug'];
+										$val  = $row[ $slug ] ?? '';
+										if ( '' === $val && 'ua' === $slug && isset( $row['uk'] ) ) {
+											$val = $row['uk'];
+										}
+										?>
+										<td>
+											<input
+												type="text"
+												class="widefat plu-str-lang-input"
+												data-lang="<?php echo esc_attr( $slug ); ?>"
+												value="<?php echo esc_attr( (string) $val ); ?>"
+												placeholder="<?php echo esc_attr( strtoupper( $slug ) ); ?>"
+											/>
+										</td>
+									<?php endforeach; ?>
+									<td class="plu-col-actions">
+										<button
+											type="button"
+											class="button button-small plu-remove-string-row"
+											title="<?php esc_attr_e( 'Удалить строку', 'polyland-up' ); ?>"
+										>
+											&#10005;
+										</button>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				</div>
+
+				<div class="plu-strings-actions">
+					<button type="button" id="plu-add-string-row" class="button button-secondary">
+						&#10133; <?php esc_html_e( 'Добавить новую строку', 'polyland-up' ); ?>
+					</button>
+
+					<button type="button" id="plu-translate-empty-strings" class="button button-secondary">
+						&#129302; <?php esc_html_e( 'Авто-перевести пустые ячейки через AI / GTX', 'polyland-up' ); ?>
+					</button>
+
+					<button type="button" id="plu-save-ui-strings" class="button button-primary">
+						&#128190; <?php esc_html_e( 'Сохранить все строки', 'polyland-up' ); ?>
+					</button>
+
+					<span class="spinner" id="plu-strings-spinner" style="float:none; margin:0;"></span>
+				</div>
+
+				<div id="plu-strings-status" class="plu-strings-status" style="display:none;"></div>
+			</div>
+		</div>
+		<?php
+	}
+
+	/**
+	 * AJAX-обработчик сохранения словаря UI-строк и синхронизации эталонных мета-ключей Divi 5.
+	 */
+	public static function ajax_save_ui_strings(): void {
+		check_ajax_referer( 'plu_admin_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( [
+				'message' => __( 'У вас недостаточно прав для выполнения этого действия.', 'polyland-up' ),
+			] );
+		}
+
+		$raw_json = isset( $_POST['rows'] ) ? wp_unslash( (string) $_POST['rows'] ) : '';
+		$rows     = json_decode( $raw_json, true );
+
+		if ( ! is_array( $rows ) ) {
+			wp_send_json_error( [
+				'message' => __( 'Некорректный формат данных таблицы строк.', 'polyland-up' ),
+			] );
+		}
+
+		$clean_strings = [];
+		foreach ( $rows as $item ) {
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+
+			$str_id = self::sanitize_string_id( (string) ( $item['id'] ?? '' ) );
+			if ( '' === $str_id ) {
+				continue;
+			}
+
+			$langs = is_array( $item['langs'] ?? null ) ? $item['langs'] : [];
+			$row   = [];
+			foreach ( $langs as $lang_slug => $val ) {
+				$clean_lang = sanitize_key( (string) $lang_slug );
+				if ( '' !== $clean_lang ) {
+					$row[ $clean_lang ] = sanitize_text_field( (string) $val );
+				}
+			}
+
+			$clean_strings[ $str_id ] = $row;
+		}
+
+		update_option( self::OPTION_NAME, $clean_strings, true );
+		self::$strings_cache = $clean_strings;
+
+		// Синхронизируем 1 эталонную запись для выпадающего списка Divi 5 Dynamic Content
+		self::sync_reference_post_meta( $clean_strings );
+
+		// Обновляем регистрацию строк в Polylang
+		self::register_polylang_strings();
+
+		wp_send_json_success( [
+			'count'   => count( $clean_strings ),
+			'message' => sprintf(
+				__( 'Сохранено UI-строк: %d. Эталонные мета-ключи plu_str_* синхронизированы для Divi 5.', 'polyland-up' ),
+				count( $clean_strings )
+			),
+		] );
+	}
+
+	/**
+	 * AJAX-обработчик пакетного авто-перевода пустых ячеек таблицы UI-строк через AI / GTX.
+	 */
+	public static function ajax_translate_ui_strings(): void {
+		check_ajax_referer( 'plu_admin_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( [
+				'message' => __( 'У вас недостаточно прав для выполнения этого действия.', 'polyland-up' ),
+			] );
+		}
+
+		if ( ! class_exists( TranslatorAPI::class ) ) {
+			wp_send_json_error( [
+				'message' => __( 'Модуль TranslatorAPI недоступен.', 'polyland-up' ),
+			] );
+		}
+
+		$raw_json = isset( $_POST['rows'] ) ? wp_unslash( (string) $_POST['rows'] ) : '';
+		$rows     = json_decode( $raw_json, true );
+
+		if ( ! is_array( $rows ) || empty( $rows ) ) {
+			wp_send_json_error( [
+				'message' => __( 'Нет строк для перевода.', 'polyland-up' ),
+			] );
+		}
+
+		$def_lang = function_exists( 'pll_default_language' ) ? sanitize_key( (string) pll_default_language( 'slug' ) ) : '';
+
+		// Группируем недостающие переводы по парам (source_lang -> target_lang) для пакетного перевода
+		$batches = [];
+
+		foreach ( $rows as $row_idx => $item ) {
+			if ( ! is_array( $item ) || ! is_array( $item['langs'] ?? null ) ) {
+				continue;
+			}
+
+			$langs       = $item['langs'];
+			$source_lang = '';
+			$source_text = '';
+
+			// Приоритет выбора исходного языка: дефолтный язык Polylang, если он заполнен, иначе первый непустой
+			if ( '' !== $def_lang && isset( $langs[ $def_lang ] ) && '' !== trim( (string) $langs[ $def_lang ] ) ) {
+				$source_lang = $def_lang;
+				$source_text = trim( (string) $langs[ $def_lang ] );
+			} else {
+				foreach ( $langs as $lang_slug => $val ) {
+					$trimmed = trim( (string) $val );
+					if ( '' !== $trimmed ) {
+						$source_lang = sanitize_key( (string) $lang_slug );
+						$source_text = $trimmed;
+						break;
+					}
+				}
+			}
+
+			if ( '' === $source_lang || '' === $source_text ) {
+				continue;
+			}
+
+			foreach ( $langs as $target_slug => $val ) {
+				$clean_target = sanitize_key( (string) $target_slug );
+				if ( '' === $clean_target || $clean_target === $source_lang ) {
+					continue;
+				}
+				if ( '' === trim( (string) $val ) ) {
+					$batches[ $source_lang ][ $clean_target ][ 'r_' . $row_idx ] = $source_text;
+				}
+			}
+		}
+
+		if ( empty( $batches ) ) {
+			wp_send_json_success( [
+				'translations'     => [],
+				'translated_count' => 0,
+				'message'          => __( 'Все ячейки уже заполнены или нет исходного текста для перевода.', 'polyland-up' ),
+			] );
+		}
+
+		$translations     = [];
+		$translated_count = 0;
+		$provider_label   = '';
+		$errors           = [];
+
+		foreach ( $batches as $source_lang => $targets ) {
+			foreach ( $targets as $target_lang => $dictionary ) {
+				$result = TranslatorAPI::translate( $dictionary, (string) $source_lang, (string) $target_lang );
+				$stats  = TranslatorAPI::get_last_stats();
+				if ( '' === $provider_label && ! empty( $stats['provider_label'] ) ) {
+					$provider_label = (string) $stats['provider_label'];
+				}
+
+				if ( is_wp_error( $result ) ) {
+					$errors[] = strtoupper( (string) $source_lang ) . '→' . strtoupper( (string) $target_lang ) . ': ' . $result->get_error_message();
+					continue;
+				}
+
+				foreach ( $result as $key => $translated_text ) {
+					$row_idx = substr( (string) $key, 2 );
+					$translations[ $row_idx ][ $target_lang ] = sanitize_text_field( (string) $translated_text );
+					++$translated_count;
+				}
+			}
+		}
+
+		if ( 0 === $translated_count && ! empty( $errors ) ) {
+			wp_send_json_error( [
+				'message' => implode( '; ', $errors ),
+			] );
+		}
+
+		wp_send_json_success( [
+			'translations'     => $translations,
+			'translated_count' => $translated_count,
+			'provider_label'   => $provider_label,
+			'message'          => sprintf(
+				__( 'Переведено пустых ячеек: %1$d (движок: %2$s). Не забудьте нажать «Сохранить все строки».', 'polyland-up' ),
+				$translated_count,
+				'' !== $provider_label ? $provider_label : 'AI/GTX'
+			),
+		] );
+	}
+}

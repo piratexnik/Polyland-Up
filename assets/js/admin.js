@@ -518,5 +518,254 @@
             });
         }
 
+        // ============================================================
+        // 5. Логика вкладки «🔤 Строки шаблонов (UI)»
+        // ============================================================
+        const $stringsBox = $('#plu-strings-manager-box');
+        if ($stringsBox.length) {
+            const $table = $('#plu-strings-table');
+            const $tbody = $('#plu-strings-tbody');
+            const $spinner = $('#plu-strings-spinner');
+            const $status = $('#plu-strings-status');
+
+            let langCols = [];
+            try {
+                langCols = JSON.parse($table.attr('data-langs') || '[]');
+            } catch (e) {
+                langCols = [];
+            }
+
+            const sanitizeId = function(val) {
+                return String(val || '')
+                    .toLowerCase()
+                    .replace(/-/g, '_')
+                    .replace(/[^a-z0-9_]/g, '')
+                    .replace(/_+/g, '_')
+                    .replace(/^_+|_+$/g, '');
+            };
+
+            const showStringsStatus = function(type, message) {
+                $status
+                    .removeClass('is-success is-error is-warning')
+                    .addClass('is-' + type)
+                    .html(esc(message))
+                    .fadeIn(150);
+            };
+
+            const collectRows = function() {
+                const rows = [];
+                $tbody.find('.plu-string-row').each(function() {
+                    const $row = $(this);
+                    const id = sanitizeId($row.find('.plu-str-id-input').val());
+                    const langs = {};
+                    $row.find('.plu-str-lang-input').each(function() {
+                        const slug = String($(this).attr('data-lang') || '');
+                        if (slug) {
+                            langs[slug] = String($(this).val() || '');
+                        }
+                    });
+                    rows.push({ id: id, langs: langs });
+                });
+                return rows;
+            };
+
+            // Обновление кнопок быстрого копирования при редактировании ID ключа
+            $tbody.on('input', '.plu-str-id-input', function() {
+                const $row = $(this).closest('.plu-string-row');
+                const cleanId = sanitizeId($(this).val());
+                const shortcodeVal = cleanId ? `[plu_str id="${cleanId}"]` : '[plu_str id="..."]';
+                const metaVal = cleanId ? `plu_str_${cleanId}` : 'plu_str_...';
+
+                const $scBtn = $row.find('.plu-copy-badge[data-copy-type="shortcode"]');
+                $scBtn.attr('data-copy-value', shortcodeVal).find('code').text(shortcodeVal);
+
+                const $metaBtn = $row.find('.plu-copy-badge[data-copy-type="meta"]');
+                $metaBtn.attr('data-copy-value', metaVal).find('code').text(metaVal);
+            });
+
+            // Копирование в буфер обмена по клику на бейдж
+            $tbody.on('click', '.plu-copy-badge', function(e) {
+                e.preventDefault();
+                const $btn = $(this);
+                const textToCopy = String($btn.attr('data-copy-value') || '');
+                if (!textToCopy || textToCopy.indexOf('...') !== -1) {
+                    return;
+                }
+
+                const markCopied = function() {
+                    const origHtml = $btn.data('orig-html') || $btn.html();
+                    $btn.data('orig-html', origHtml);
+                    $btn.addClass('is-copied').text('✓ Скопировано!');
+                    setTimeout(function() {
+                        $btn.removeClass('is-copied').html(origHtml);
+                    }, 1400);
+                };
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(textToCopy).then(markCopied).catch(function() {});
+                } else {
+                    const $tmp = $('<textarea>').val(textToCopy).appendTo('body').select();
+                    try {
+                        document.execCommand('copy');
+                        markCopied();
+                    } catch (err) {}
+                    $tmp.remove();
+                }
+            });
+
+            // Добавление новой строки
+            $('#plu-add-string-row').on('click', function(e) {
+                e.preventDefault();
+                let langCellsHtml = '';
+                langCols.forEach(function(col) {
+                    const slug = esc(col.slug || '');
+                    langCellsHtml += `
+                        <td>
+                            <input
+                                type="text"
+                                class="widefat plu-str-lang-input"
+                                data-lang="${slug}"
+                                value=""
+                                placeholder="${slug.toUpperCase()}"
+                            />
+                        </td>
+                    `;
+                });
+
+                const rowHtml = `
+                    <tr class="plu-string-row">
+                        <td>
+                            <input type="text" class="regular-text plu-str-id-input" value="" placeholder="new_key" />
+                        </td>
+                        <td>
+                            <div class="plu-copy-badges">
+                                <button type="button" class="button button-small plu-copy-badge" data-copy-type="shortcode" data-copy-value="">
+                                    &#128203; <code>[plu_str id="..."]</code>
+                                </button>
+                                <button type="button" class="button button-small plu-copy-badge" data-copy-type="meta" data-copy-value="">
+                                    &#128203; <code>plu_str_...</code>
+                                </button>
+                            </div>
+                        </td>
+                        ${langCellsHtml}
+                        <td class="plu-col-actions">
+                            <button type="button" class="button button-small plu-remove-string-row" title="Удалить строку">&#10005;</button>
+                        </td>
+                    </tr>
+                `;
+
+                const $newRow = $(rowHtml);
+                $tbody.append($newRow);
+                $newRow.find('.plu-str-id-input').focus();
+            });
+
+            // Удаление строки
+            $tbody.on('click', '.plu-remove-string-row', function(e) {
+                e.preventDefault();
+                $(this).closest('.plu-string-row').remove();
+            });
+
+            // Авто-перевод пустых ячеек через AI / GTX
+            $('#plu-translate-empty-strings').on('click', function(e) {
+                e.preventDefault();
+                const $btn = $(this);
+                const rows = collectRows();
+
+                $btn.prop('disabled', true);
+                $('#plu-save-ui-strings').prop('disabled', true);
+                $spinner.addClass('is-active');
+                $status.hide();
+
+                $.ajax({
+                    url: pluAdminData.ajax_url,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: {
+                        action: 'plu_translate_ui_strings',
+                        nonce: pluAdminData.nonce,
+                        rows: JSON.stringify(rows)
+                    },
+                    success: function(response) {
+                        if (response.success && response.data) {
+                            const translations = response.data.translations || {};
+                            const $domRows = $tbody.find('.plu-string-row');
+
+                            Object.keys(translations).forEach(function(rowIdxStr) {
+                                const idx = parseInt(rowIdxStr, 10);
+                                const $row = $domRows.eq(idx);
+                                if (!$row.length) {
+                                    return;
+                                }
+                                const langMap = translations[rowIdxStr] || {};
+                                Object.keys(langMap).forEach(function(langSlug) {
+                                    const $input = $row.find(`.plu-str-lang-input[data-lang="${langSlug}"]`);
+                                    if ($input.length && !String($input.val() || '').trim()) {
+                                        $input.val(langMap[langSlug]).addClass('is-ai-filled');
+                                    }
+                                });
+                            });
+
+                            showStringsStatus('success', response.data.message || 'Перевод выполнен.');
+                        } else {
+                            const msg = (response.data && response.data.message) ? response.data.message : 'Ошибка авто-перевода.';
+                            showStringsStatus('error', msg);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        showStringsStatus('error', `Сетевая ошибка (${error || status}, HTTP ${xhr.status || 500})`);
+                    },
+                    complete: function() {
+                        $btn.prop('disabled', false);
+                        $('#plu-save-ui-strings').prop('disabled', false);
+                        $spinner.removeClass('is-active');
+                    }
+                });
+            });
+
+            // Сохранение всех строк
+            $('#plu-save-ui-strings').on('click', function(e) {
+                e.preventDefault();
+                const $btn = $(this);
+                const rows = collectRows();
+
+                // Нормализуем ID в DOM
+                $tbody.find('.plu-str-id-input').each(function() {
+                    $(this).val(sanitizeId($(this).val())).trigger('input');
+                });
+
+                $btn.prop('disabled', true);
+                $('#plu-translate-empty-strings').prop('disabled', true);
+                $spinner.addClass('is-active');
+                $status.hide();
+
+                $.ajax({
+                    url: pluAdminData.ajax_url,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: {
+                        action: 'plu_save_ui_strings',
+                        nonce: pluAdminData.nonce,
+                        rows: JSON.stringify(rows)
+                    },
+                    success: function(response) {
+                        if (response.success && response.data) {
+                            showStringsStatus('success', response.data.message || 'Строки успешно сохранены.');
+                        } else {
+                            const msg = (response.data && response.data.message) ? response.data.message : 'Ошибка сохранения.';
+                            showStringsStatus('error', msg);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        showStringsStatus('error', `Сетевая ошибка (${error || status}, HTTP ${xhr.status || 500})`);
+                    },
+                    complete: function() {
+                        $btn.prop('disabled', false);
+                        $('#plu-translate-empty-strings').prop('disabled', false);
+                        $spinner.removeClass('is-active');
+                    }
+                });
+            });
+        }
+
     });
 })(jQuery);

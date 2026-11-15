@@ -898,6 +898,7 @@ final class Settings {
         $tabs = [
             'general' => __( 'Основные', 'polyland-up' ),
             'menus'   => __( '🍔 Дубликатор Меню', 'polyland-up' ),
+            'strings' => __( '🔤 Строки шаблонов (UI)', 'polyland-up' ),
         ];
         if ( ! array_key_exists( $active_tab, $tabs ) ) {
             $active_tab = 'general';
@@ -975,6 +976,8 @@ final class Settings {
                     </form>
                 <?php elseif ( 'menus' === $active_tab ) : ?>
                     <?php \PolylangUp\Modules\MenuDuplicator::render_tab_content(); ?>
+                <?php elseif ( 'strings' === $active_tab ) : ?>
+                    <?php \PolylangUp\Modules\StringsManager::render_tab_content(); ?>
                 <?php endif; ?>
             </div>
         </div>

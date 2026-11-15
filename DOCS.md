@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `2.5`
+- **Текущая версия:** `2.6`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -36,11 +36,12 @@ Polyland-Up/
         ├── DiviParser.php    # Рекурсивный парсер блоков Divi 5, шорткодов и Rank Math (Этап 4)
         ├── TranslatorAPI.php # Шлюз Google Translate GTX и Gemini API (Этап 5)
         ├── LinkRewriter.php  # Умная перелинковка внутренних ссылок (Этап 6)
-        └── MenuDuplicator.php # AI Дубликатор и Переводчик Меню WordPress / Polylang
+        ├── MenuDuplicator.php # AI Дубликатор и Переводчик Меню WordPress / Polylang
+        └── StringsManager.php # UI-Строки для шаблонов Divi 5 Theme Builder
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '2.5'
+- `PLU_VERSION` — '2.6'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -226,3 +227,21 @@ if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() )
     }
 }
 ```
+
+---
+
+## 12. UI-Строки для шаблонов Divi 5 Theme Builder (`StringsManager.php`)
+Модуль позволяет использовать единый шаблон Divi 5 Theme Builder (архивы, циклы Loop, шапка, подвал, 404) для всех языков Polylang без дублирования шаблонов:
+1. **Хранение и кеширование:**
+   - Словарь хранится в опции `plu_ui_strings` (autoload) со статическим кешем в памяти (`$strings_cache`) — **0 дополнительных запросов к БД** в циклах.
+   - При первой инициализации предзаполняются 10 базовых ключей (`read_more`, `home`, `published_on`, `updated_on`, `all_news`, `back_to_list`, `search_placeholder`, `no_results`, `share`, `categories`).
+   - Все строки синхронизируются с нативным реестром Polylang (`pll_register_string(..., 'Polylang AI UI')` на хуке `init`).
+2. **Три способа вывода:**
+   - Шорткод `[plu_str id="read_more" before="" after="" default=""]` (с гарантированным раскрытием через `render_block`, `et_pb_module_content`, `et_module_shortcode_output`).
+   - Виртуальные мета-ключи `plu_str_{id}` через фильтр `get_post_metadata` для `Dynamic Content -> Custom Field` в Divi 5. При сохранении в админке эталонные ключи синхронизируются только на 1 опорной записи (`plu_ui_strings_ref_post_id`), чтобы `SELECT DISTINCT meta_key FROM wp_postmeta` в Divi 5 видел все ключи без засорения остальных постов.
+   - Бонусный шорткод мультиязычной даты `[plu_date format="l, j F Y"]` через `wp_date()`.
+3. **Интерфейс админки (`admin.php?page=polylang-up&tab=strings`):**
+   - Динамические колонки языков через `pll_languages_list(['fields' => ''])`.
+   - Кнопки быстрого копирования `[plu_str id="..."]` и `plu_str_...` в буфер обмена.
+   - Пакетный авто-перевод пустых ячеек через `wp_ajax_plu_translate_ui_strings` (`TranslatorAPI::translate()`) и сохранение через `wp_ajax_plu_save_ui_strings`.
+

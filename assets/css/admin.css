@@ -424,3 +424,198 @@
     border-color: #dcdcde;
     background: #f0f0f1;
 }
+
+/* ========================================================
+ * UI Strings Manager Tab (Divi 5 Theme Builder)
+ * ======================================================== */
+.plu-strings-guide-card,
+.plu-strings-table-card {
+    background: #ffffff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    padding: 20px 24px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    margin-bottom: 20px;
+}
+
+.plu-strings-guide-card {
+    border-left: 4px solid #2271b1;
+}
+
+.plu-guide-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+}
+
+.plu-guide-item {
+    background: #f6f7f7;
+    border: 1px solid #e2e4e7;
+    border-radius: 4px;
+    padding: 12px 14px;
+}
+
+.plu-guide-title {
+    font-weight: 600;
+    font-size: 13px;
+    color: #1d2327;
+    margin-bottom: 6px;
+}
+
+.plu-guide-item p {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: #50575e;
+}
+
+.plu-guide-item code {
+    display: inline-block;
+    padding: 3px 7px;
+    font-size: 12px;
+    background: #ffffff;
+    border: 1px solid #dcdcde;
+    border-radius: 3px;
+    color: #135e96;
+}
+
+.plu-guide-sub {
+    margin-top: 8px;
+    font-size: 11.5px;
+    color: #50575e;
+}
+
+.plu-strings-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.plu-strings-table-scroll {
+    overflow-x: auto;
+}
+
+.plu-strings-table th {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.plu-col-id {
+    min-width: 150px;
+    width: 170px;
+}
+
+.plu-col-copy {
+    min-width: 210px;
+    width: 230px;
+}
+
+.plu-col-lang {
+    min-width: 170px;
+}
+
+.plu-col-actions {
+    width: 60px;
+    text-align: center !important;
+}
+
+.plu-th-flag img {
+    vertical-align: middle;
+    margin-right: 4px;
+}
+
+.plu-th-slug {
+    color: #646970;
+    font-weight: 400;
+    font-size: 12px;
+}
+
+.plu-str-id-input {
+    width: 100% !important;
+    font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+.plu-copy-badges {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.plu-copy-badge {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
+    text-align: left;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    padding: 2px 6px !important;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.plu-copy-badge code {
+    background: transparent;
+    padding: 0;
+    font-size: 11px;
+    color: #135e96;
+}
+
+.plu-copy-badge.is-copied {
+    background: #edfaef !important;
+    border-color: #46b450 !important;
+    color: #1a7a28 !important;
+}
+
+.plu-str-lang-input.is-ai-filled {
+    background-color: #f0f9eb;
+    border-color: #46b450;
+    transition: background-color 0.4s ease;
+}
+
+.plu-remove-string-row {
+    color: #b32d2e !important;
+    border-color: #dcdcde !important;
+}
+
+.plu-remove-string-row:hover {
+    background: #fef0f0 !important;
+    border-color: #d63638 !important;
+}
+
+.plu-strings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.plu-strings-status {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.plu-strings-status.is-success {
+    background: #f0f9eb;
+    border-left: 4px solid #46b450;
+    color: #27672a;
+}
+
+.plu-strings-status.is-error {
+    background: #fef0f0;
+    border-left: 4px solid #dc3232;
+    color: #a02020;
+}
+
+.plu-strings-status.is-warning {
+    background: #fcf9e8;
+    border-left: 4px solid #dba617;
+    color: #7c5400;
+}
+
