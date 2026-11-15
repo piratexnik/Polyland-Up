@@ -583,15 +583,22 @@ final class MetaboxUI {
             }
 
             // КРИТИЧНО для Divi 5: оборачиваем контент в wp_slash(), чтобы wp_insert_post не уничтожил экранирование \" в JSON блоков!
+            $post_date_gmt = ( ! empty( $source_post->post_date_gmt ) && '0000-00-00 00:00:00' !== $source_post->post_date_gmt )
+                ? $source_post->post_date_gmt
+                : get_gmt_from_date( $source_post->post_date );
+
             $post_data = [
-                'post_type'    => $source_post->post_type,
-                'post_status'  => $target_status,
-                'post_title'   => wp_slash( $post_title ),
-                'post_excerpt' => wp_slash( $post_excerpt ),
-                'post_content' => wp_slash( $post_content ),
-                'post_parent'  => $target_parent,
-                'menu_order'   => (int) $source_post->menu_order,
-                'post_author'  => get_current_user_id() ?: (int) $source_post->post_author,
+                'post_type'     => $source_post->post_type,
+                'post_status'   => $target_status,
+                'post_title'    => wp_slash( $post_title ),
+                'post_excerpt'  => wp_slash( $post_excerpt ),
+                'post_content'  => wp_slash( $post_content ),
+                'post_parent'   => $target_parent,
+                'menu_order'    => (int) $source_post->menu_order,
+                'post_author'   => get_current_user_id() ?: (int) $source_post->post_author,
+                'post_date'     => $source_post->post_date,
+                'post_date_gmt' => $post_date_gmt,
+                'edit_date'     => true,
             ];
 
             if ( ! empty( $options['keep_same_slug'] ) && '' !== $source_post->post_name ) {
@@ -760,6 +767,10 @@ final class MetaboxUI {
 
             SameSlug::$forced_lang = $assigned_lang;
             try {
+                $post_date_gmt = ( ! empty( $source_post->post_date_gmt ) && '0000-00-00 00:00:00' !== $source_post->post_date_gmt )
+                    ? $source_post->post_date_gmt
+                    : get_gmt_from_date( $source_post->post_date );
+
                 $update_data = [
                     'ID'            => $source_post->ID,
                     'post_title'    => wp_slash( $post_title ),
@@ -767,7 +778,8 @@ final class MetaboxUI {
                     'post_content'  => wp_slash( $post_content ),
                     'post_name'     => $source_post->post_name,
                     'post_date'     => $source_post->post_date,
-                    'post_date_gmt' => $source_post->post_date_gmt,
+                    'post_date_gmt' => $post_date_gmt,
+                    'edit_date'     => true,
                     'post_status'   => $source_post->post_status,
                 ];
 
