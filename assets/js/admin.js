@@ -863,6 +863,11 @@
             const $progressPercent = $('#plu-bulk-progress-percent');
             const $progressBar = $('#plu-bulk-progress-bar');
             const $processLog = $('#plu-bulk-process-log');
+            const $logToolbar = $('#plu-bulk-log-toolbar');
+            const $clearLogBtn = $('#plu-bulk-clear-log-btn');
+            const $autoHideCb = $('#plu-bulk-auto-hide-done');
+            const $hideDoneBtn = $('#plu-bulk-hide-done-btn');
+            let lastScanCounts = null;
 
             let activeLangs = [];
             try {
@@ -1017,6 +1022,38 @@
                 `;
             };
 
+            const renderScanStats = function() {
+                if (lastScanCounts) {
+                    $scanStats.html(
+                        `Всего групп в выборке: <strong>${esc(lastScanCounts.total_scanned)}</strong> | ` +
+                        `Требуют действий: <strong>${esc(lastScanCounts.needs_action)}</strong> | ` +
+                        `Пересортица: <strong>${esc(lastScanCounts.mismatch_only)}</strong> | ` +
+                        `Полностью готовы: <strong>${esc(lastScanCounts.complete)}</strong>`
+                    );
+                } else {
+                    $scanStats.empty();
+                }
+
+                const hasDoneRows = $tbody.find('.plu-bulk-row.is-complete').length > 0;
+                if (hasDoneRows) {
+                    $hideDoneBtn.show();
+                } else {
+                    $hideDoneBtn.hide();
+                }
+            };
+
+            const renderEmptyDoneRow = function(msg) {
+                const colSpan = 5 + activeLangs.length;
+                $tbody.html(`
+                    <tr>
+                        <td colspan="${colSpan}" style="text-align:center; padding:24px; color:#1a7a28;">
+                            <strong>${msg}</strong>
+                        </td>
+                    </tr>
+                `);
+                $selectAllCb.prop('checked', false);
+            };
+
             const updateSelectedCounter = function() {
                 const totalRows = $tbody.find('.plu-bulk-row-cb').length;
                 const checkedCount = $tbody.find('.plu-bulk-row-cb:checked').length;
@@ -1039,7 +1076,8 @@
             // Сканирование статей
             const runScan = function() {
                 const sourceFilter = String($('#plu-bulk-source-filter').val() || 'all_posts');
-                const year = parseInt($('#plu-bulk-year-filter').val(), 10) || 0;
+                const yearFrom = parseInt($('#plu-bulk-year-from').val(), 10) || 0;
+                const yearTo = parseInt($('#plu-bulk-year-to').val(), 10) || 0;
                 const problemFilter = String($('#plu-bulk-problem-filter').val() || 'needs_action');
 
                 $scanBtn.prop('disabled', true);
@@ -1053,7 +1091,8 @@
                         action: 'plu_bulk_scan_category',
                         nonce: pluAdminData.nonce,
                         source_filter: sourceFilter,
-                        year: year,
+                        year_from: yearFrom,
+                        year_to: yearTo,
                         problem_filter: problemFilter
                     },
                     success: function(response) {
@@ -1061,32 +1100,18 @@
                             const d = response.data;
                             renderCategoryStatusBar(d.category_info || null);
 
-                            if (d.counts) {
-                                $scanStats.html(
-                                    `Всего групп в выборке: <strong>${esc(d.counts.total_scanned)}</strong> | ` +
-                                    `Требуют действий: <strong>${esc(d.counts.needs_action)}</strong> | ` +
-                                    `Пересортица: <strong>${esc(d.counts.mismatch_only)}</strong> | ` +
-                                    `Полностью готовы: <strong>${esc(d.counts.complete)}</strong>`
-                                );
-                            }
+                            lastScanCounts = d.counts ? Object.assign({}, d.counts) : null;
 
                             const rows = Array.isArray(d.rows) ? d.rows : [];
                             if (rows.length === 0) {
-                                const colSpan = 5 + activeLangs.length;
-                                $tbody.html(`
-                                    <tr>
-                                        <td colspan="${colSpan}" style="text-align:center; padding:24px; color:#1a7a28;">
-                                            <strong>&#9989; По выбранным фильтрам статей, требующих внимания, не найдено!</strong>
-                                        </td>
-                                    </tr>
-                                `);
-                                $selectAllCb.prop('checked', false);
+                                renderEmptyDoneRow('&#9989; По выбранным фильтрам статей, требующих внимания, не найдено!');
                             } else {
                                 const htmlRows = rows.map(r => renderAuditRowHtml(r, '')).join('');
                                 $tbody.html(htmlRows);
                                 const allChecked = $tbody.find('.plu-bulk-row-cb:not(:checked)').length === 0;
                                 $selectAllCb.prop('checked', allChecked);
                             }
+                            renderScanStats();
                             updateSelectedCounter();
                         } else {
                             const msg = (response.data && response.data.message) ? response.data.message : 'Ошибка сканирования.';
@@ -1222,6 +1247,8 @@
                         if (response.success && response.data) {
                             const d = response.data;
                             const summaryText = d.summary || 'Готово';
+                            const isComplete = !!(d.row && d.row.is_complete);
+                            const wasIncomplete = !$row.hasClass('is-complete');
 
                             if (d.row && d.row.post_id) {
                                 const newRowHtml = renderAuditRowHtml(d.row, summaryText);
@@ -1232,15 +1259,41 @@
                                 $row.find('.plu-bulk-single-run-btn').prop('disabled', false).text('✓ Готово');
                             }
 
+                            if (isComplete && wasIncomplete && lastScanCounts) {
+                                lastScanCounts.complete = (parseInt(lastScanCounts.complete, 10) || 0) + 1;
+                                lastScanCounts.needs_action = Math.max(0, (parseInt(lastScanCounts.needs_action, 10) || 0) - 1);
+                            }
+
+                            $logToolbar.show();
                             $processLog.prepend(
                                 `<div class="plu-log-item is-success">` +
                                 `<strong>&#9989; Статья #${esc(postId)} (${esc(d.date)}, slug: <code>${esc(d.clean_slug)}</code>):</strong> ${esc(summaryText)}` +
                                 `</div>`
                             );
+
+                            if (isComplete && $autoHideCb.is(':checked')) {
+                                setTimeout(function() {
+                                    const $targetRow = $(`#plu-bulk-row-${postId}`);
+                                    if ($targetRow.length) {
+                                        $targetRow.fadeOut(300, function() {
+                                            $(this).remove();
+                                            if ($tbody.find('.plu-bulk-row').length === 0) {
+                                                renderEmptyDoneRow('&#9989; Все отмеченные статьи в текущем списке успешно обработаны!');
+                                            }
+                                            renderScanStats();
+                                            updateSelectedCounter();
+                                        });
+                                    }
+                                }, 1200);
+                            } else {
+                                renderScanStats();
+                                updateSelectedCounter();
+                            }
                         } else {
                             const errMsg = (response.data && response.data.message) ? response.data.message : 'Ошибка обработки статьи.';
                             $row.removeClass('is-processing').addClass('is-error');
                             $row.find('.plu-bulk-single-run-btn').prop('disabled', false).text('⚡ Повторить');
+                            $logToolbar.show();
                             $processLog.prepend(
                                 `<div class="plu-log-item is-error"><strong>&#10060; Статья #${esc(postId)}:</strong> ${esc(errMsg)}</div>`
                             );
@@ -1249,6 +1302,7 @@
                     error: function(xhr, status, error) {
                         $row.removeClass('is-processing').addClass('is-error');
                         $row.find('.plu-bulk-single-run-btn').prop('disabled', false).text('⚡ Повторить');
+                        $logToolbar.show();
                         $processLog.prepend(
                             `<div class="plu-log-item is-error"><strong>&#10060; Статья #${esc(postId)}:</strong> Сетевая ошибка (${esc(error || status)}, HTTP ${esc(xhr.status || 500)})</div>`
                         );
@@ -1310,6 +1364,7 @@
                 $startBtn.prop('disabled', true);
                 $stopBtn.show();
                 $progressWrap.show();
+                $logToolbar.show();
                 $processLog.empty().show();
 
                 runBulkQueue(selectedIds, 0, cfg);
@@ -1348,9 +1403,35 @@
                 $startBtn.prop('disabled', true);
                 $stopBtn.show();
                 $progressWrap.show();
+                $logToolbar.show();
                 $processLog.show();
 
                 runBulkQueue([postId], 0, cfg);
+            });
+
+            // Ручное скрытие выполненных (✅) строк из таблицы
+            $hideDoneBtn.on('click', function(e) {
+                e.preventDefault();
+                const $doneRows = $tbody.find('.plu-bulk-row.is-complete');
+                if ($doneRows.length === 0) {
+                    $hideDoneBtn.hide();
+                    return;
+                }
+                $doneRows.fadeOut(300, function() {
+                    $(this).remove();
+                    if ($tbody.find('.plu-bulk-row').length === 0) {
+                        renderEmptyDoneRow('&#9989; Все выполненные статьи скрыты из таблицы!');
+                    }
+                    renderScanStats();
+                    updateSelectedCounter();
+                });
+            });
+
+            // Очистка лога выполнения
+            $clearLogBtn.on('click', function(e) {
+                e.preventDefault();
+                $processLog.empty().hide();
+                $logToolbar.hide();
             });
         }
 

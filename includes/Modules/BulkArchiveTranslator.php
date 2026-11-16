@@ -287,15 +287,29 @@ final class BulkArchiveTranslator {
 					</div>
 
 					<div class="plu-bulk-filter-item">
-						<label for="plu-bulk-year-filter" class="plu-section-label">
-							<?php esc_html_e( 'Год публикации:', 'polyland-up' ); ?>
-						</label>
-						<select id="plu-bulk-year-filter" class="widefat">
-							<option value="0"><?php esc_html_e( 'Все годы', 'polyland-up' ); ?></option>
-							<?php foreach ( $years as $yr ) : ?>
-								<option value="<?php echo esc_attr( (string) $yr ); ?>"><?php echo esc_html( (string) $yr ); ?></option>
-							<?php endforeach; ?>
-						</select>
+						<span class="plu-section-label">
+							<?php esc_html_e( 'Период публикации (год):', 'polyland-up' ); ?>
+						</span>
+						<div class="plu-bulk-year-pair">
+							<label class="plu-year-sublabel">
+								<span><?php esc_html_e( 'Год с (от):', 'polyland-up' ); ?></span>
+								<select id="plu-bulk-year-from" class="widefat">
+									<option value="0"><?php esc_html_e( 'Все годы', 'polyland-up' ); ?></option>
+									<?php foreach ( $years as $yr ) : ?>
+										<option value="<?php echo esc_attr( (string) $yr ); ?>"><?php echo esc_html( (string) $yr ); ?></option>
+									<?php endforeach; ?>
+								</select>
+							</label>
+							<label class="plu-year-sublabel">
+								<span><?php esc_html_e( 'по (до):', 'polyland-up' ); ?></span>
+								<select id="plu-bulk-year-to" class="widefat">
+									<option value="0"><?php esc_html_e( 'Все годы', 'polyland-up' ); ?></option>
+									<?php foreach ( $years as $yr ) : ?>
+										<option value="<?php echo esc_attr( (string) $yr ); ?>"><?php echo esc_html( (string) $yr ); ?></option>
+									<?php endforeach; ?>
+								</select>
+							</label>
+						</div>
 					</div>
 
 					<div class="plu-bulk-filter-item">
@@ -461,6 +475,11 @@ final class BulkArchiveTranslator {
 				</div>
 
 				<!-- Подробный лог пакетной сессии -->
+				<div id="plu-bulk-log-toolbar" class="plu-bulk-log-toolbar" style="display:none;">
+					<button type="button" id="plu-bulk-clear-log-btn" class="button button-small button-secondary">
+						<?php esc_html_e( '🧹 Очистить лог выполнения', 'polyland-up' ); ?>
+					</button>
+				</div>
 				<div id="plu-bulk-process-log" class="plu-duplicator-log plu-bulk-log" style="display:none;"></div>
 			</div>
 
@@ -468,7 +487,16 @@ final class BulkArchiveTranslator {
 			<div class="plu-bulk-card plu-bulk-table-card">
 				<div class="plu-bulk-table-header">
 					<h2 style="margin:0;"><?php esc_html_e( '📋 3. Таблица ревизии статей', 'polyland-up' ); ?></h2>
-					<div id="plu-bulk-scan-stats" class="plu-bulk-scan-stats"></div>
+					<div class="plu-bulk-table-controls">
+						<label class="plu-bulk-auto-hide-label">
+							<input type="checkbox" id="plu-bulk-auto-hide-done" value="1" checked="checked" />
+							<span><?php esc_html_e( '🧹 Автоматически убирать готовые статьи из списка после обработки', 'polyland-up' ); ?></span>
+						</label>
+						<button type="button" id="plu-bulk-hide-done-btn" class="button button-small button-secondary" style="display:none;">
+							<?php esc_html_e( 'Скрыть выполненные (✅) сейчас', 'polyland-up' ); ?>
+						</button>
+						<div id="plu-bulk-scan-stats" class="plu-bulk-scan-stats"></div>
+					</div>
 				</div>
 
 				<div class="plu-strings-table-scroll">
@@ -573,10 +601,11 @@ final class BulkArchiveTranslator {
 		}
 
 		$source_filter  = sanitize_text_field( wp_unslash( (string) ( $_POST['source_filter'] ?? 'all_posts' ) ) );
-		$year           = absint( $_POST['year'] ?? 0 );
+		$year_from      = absint( $_POST['year_from'] ?? ( $_POST['year'] ?? 0 ) );
+		$year_to        = absint( $_POST['year_to'] ?? 0 );
 		$problem_filter = sanitize_key( wp_unslash( (string) ( $_POST['problem_filter'] ?? 'needs_action' ) ) );
 
-		$result = self::scan_archive_items( $source_filter, $year, $problem_filter );
+		$result = self::scan_archive_items( $source_filter, $year_from, $problem_filter, $year_to );
 		wp_send_json_success( $result );
 	}
 
@@ -584,11 +613,17 @@ final class BulkArchiveTranslator {
 	 * Сканирование записей и группировка по связям Polylang / чистому слагу.
 	 *
 	 * @param string $source_filter  'all_posts', 'all_pages' или 'cat_{ID}'.
-	 * @param int    $year           Фильтр по году (0 — все годы).
+	 * @param int    $year_from      Год начала периода (0 — без ограничения снизу).
 	 * @param string $problem_filter 'all', 'needs_action', 'mismatch_only', 'complete'.
+	 * @param int    $year_to        Год конца периода (0 — без ограничения сверху).
 	 * @return array<string, mixed>
 	 */
-	public static function scan_archive_items( string $source_filter, int $year = 0, string $problem_filter = 'needs_action' ): array {
+	public static function scan_archive_items(
+		string $source_filter,
+		int $year_from = 0,
+		string $problem_filter = 'needs_action',
+		int $year_to = 0
+	): array {
 		$post_type = 'post';
 		$cat_id    = 0;
 
@@ -622,10 +657,37 @@ final class BulkArchiveTranslator {
 			];
 		}
 
-		if ( $year > 0 ) {
+		if ( $year_from > 0 && $year_to > 0 ) {
+			$min_year = min( $year_from, $year_to );
+			$max_year = max( $year_from, $year_to );
+			if ( $min_year === $max_year ) {
+				$query_args['date_query'] = [
+					[
+						'year' => $min_year,
+					],
+				];
+			} else {
+				$query_args['date_query'] = [
+					[
+						'after'     => [
+							'year'  => $min_year,
+							'month' => 1,
+							'day'   => 1,
+						],
+						'before'    => [
+							'year'  => $max_year,
+							'month' => 12,
+							'day'   => 31,
+						],
+						'inclusive' => true,
+					],
+				];
+			}
+		} elseif ( $year_from > 0 || $year_to > 0 ) {
+			$single_year              = $year_from > 0 ? $year_from : $year_to;
 			$query_args['date_query'] = [
 				[
-					'year' => $year,
+					'year' => $single_year,
 				],
 			];
 		}

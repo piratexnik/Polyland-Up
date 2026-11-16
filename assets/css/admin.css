@@ -836,9 +836,23 @@
 
 .plu-bulk-filters-grid {
     display: grid;
-    grid-template-columns: 2fr 1fr 1.6fr auto;
+    grid-template-columns: 2fr 1.3fr 1.5fr auto;
     gap: 14px;
     align-items: end;
+}
+
+.plu-bulk-year-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.plu-year-sublabel {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 11px;
+    color: #50575e;
 }
 
 @media (max-width: 960px) {
@@ -982,6 +996,12 @@
     transition: width 0.25s ease;
 }
 
+.plu-bulk-log-toolbar {
+    margin-top: 12px;
+    display: flex;
+    justify-content: flex-end;
+}
+
 .plu-bulk-table-header {
     display: flex;
     flex-wrap: wrap;
@@ -989,6 +1009,22 @@
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 14px;
+}
+
+.plu-bulk-table-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.plu-bulk-auto-hide-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: #2c3338;
+    cursor: pointer;
 }
 
 .plu-bulk-scan-stats {
