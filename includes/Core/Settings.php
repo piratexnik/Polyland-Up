@@ -29,6 +29,7 @@ final class Settings {
             'gemini_api_key'     => '',
             'gemini_model'       => 'gemini-2.5-flash',
             'system_prompt'      => "Ты — профессиональный технический SEO-локализатор для веб-сайтов на WordPress и Divi 5. Переводи тексты точно по смыслу, сохраняя деловой, естественный и экспертный тон целевого языка.\n\nСТРОГИЕ ПРАВИЛА:\n1) Сохраняй все HTML-теги, шорткоды, блоки и параметры Divi 5, URL-адреса, артикулы, числовые значения и переменные Rank Math (%sep%, %sitename%, %title% и др.) без изменений.\n2) При переводе на английский (EN) или другие языки на латинице полностью исключай остаточную кириллицу как в видимом тексте, так и в переводимых атрибутах (alt, title, aria-label, placeholder).\n3) Правила для ключей Rank Math SEO:\n- Для ключа __meta__rank_math_title (SEO Title): емкий SEO-перевод длиной до 55–60 символов (без учета переменных %sep% %sitename%).\n- Для ключа __meta__rank_math_description (Meta Description): привлекательный SEO-перевод длиной до 150–160 символов.\n- Для ключа __meta__rank_math_focus_keyword: точный релевантный поисковый ключ на целевом языке.",
+            'protected_terms'      => 'TM SCaT, ТМ SCaT, SCaT, Scat, elcomUkraine, elcom, interBUDexpo, LOTSMAN, Agraf, Inox, Zinga',
             'github_token'         => '',
             'pg_accent_color'      => '#006d77',
             'pg_active_text_color' => '#ffffff',
@@ -45,6 +46,35 @@ final class Settings {
         ];
 
         return $defaults[ $key ] ?? '';
+    }
+
+    /**
+     * Возвращает массив защищенных брендов и терминов, отсортированный по убыванию длины.
+     *
+     * @return array<int, string>
+     */
+    public static function get_protected_terms(): array {
+        $raw   = (string) plu_get_option( 'protected_terms', self::get_default( 'protected_terms' ) );
+        $parts = preg_split( '/[\r\n,]+/u', $raw );
+        if ( ! is_array( $parts ) ) {
+            return [];
+        }
+
+        $terms = [];
+        foreach ( $parts as $item ) {
+            $trimmed = trim( (string) $item );
+            if ( '' !== $trimmed ) {
+                $terms[ mb_strtolower( $trimmed, 'UTF-8' ) ] = $trimmed;
+            }
+        }
+
+        $list = array_values( $terms );
+        usort(
+            $list,
+            static fn( string $a, string $b ): int => mb_strlen( $b, 'UTF-8' ) <=> mb_strlen( $a, 'UTF-8' )
+        );
+
+        return $list;
     }
 
     /**
@@ -233,6 +263,14 @@ final class Settings {
             self::PAGE_SLUG,
             'plu_section_ai',
             [ 'class' => 'plu-gemini-field' ]
+        );
+
+        add_settings_field(
+            'protected_terms',
+            __( '🛡 Защищенные бренды и термины (Не переводить в GTX и AI)', 'polyland-up' ),
+            [ self::class, 'render_field_protected_terms' ],
+            self::PAGE_SLUG,
+            'plu_section_ai'
         );
 
         // Поле проверки подключения к API
@@ -457,6 +495,21 @@ final class Settings {
         </div>
         <p class="description">
             <?php esc_html_e( 'Инструкция для модели Gemini при переводе контента, шорткодов Divi 5 и переменных Rank Math SEO.', 'polyland-up' ); ?>
+        </p>
+        <?php
+    }
+
+    public static function render_field_protected_terms(): void {
+        $terms = (string) plu_get_option( 'protected_terms', self::get_default( 'protected_terms' ) );
+        ?>
+        <textarea
+            name="<?php echo esc_attr( self::OPTION_NAME ); ?>[protected_terms]"
+            id="plu_protected_terms"
+            rows="3"
+            class="large-text"
+        ><?php echo esc_textarea( $terms ); ?></textarea>
+        <p class="description">
+            <?php esc_html_e( 'Список брендов, названий выставок и терминов через запятую или с новой строки. Они будут защищены токенами [[9xxx]] от перевода в Google GTX, переданы как запрещённые к переводу в Gemini AI и учтены в детекторе языка.', 'polyland-up' ); ?>
         </p>
         <?php
     }

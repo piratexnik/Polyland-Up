@@ -167,7 +167,7 @@ final class TranslatorAPI {
 
         foreach ( $dictionary as $key => $text ) {
             $map = [];
-            $protected_dict[ $key ] = self::protect_special_tokens( (string) $text, $map );
+            $protected_dict[ $key ] = self::protect_special_tokens( (string) $text, $map, $sl, $tl );
             $tokens_maps[ $key ]    = $map;
         }
 
@@ -340,14 +340,22 @@ final class TranslatorAPI {
     }
 
     /**
-     * Замена переменных Rank Math (%sep%, %sitename%, %title% и др.) и HTML-тегов
+     * Замена переменных Rank Math (%sep%, %sitename%, %title% и др.), HTML-тегов,
+     * защищённых брендов (protected_terms) и латинских слов при переводе между кириллическими языками
      * на числовые токены [[9000]], [[9001]]... перед отправкой в GTX.
      *
      * @param string             $text       Исходный текст.
      * @param array<int, string> $tokens_map Карта восстановленных значений по индексу.
+     * @param string             $sl         Нормализованный код исходного языка.
+     * @param string             $tl         Нормализованный код целевого языка.
      * @return string Защищенный текст.
      */
-    public static function protect_special_tokens( string $text, array &$tokens_map ): string {
+    public static function protect_special_tokens(
+        string $text,
+        array &$tokens_map,
+        string $sl = '',
+        string $tl = ''
+    ): string {
         $counter    = 9000;
         $tokens_map = [];
 
@@ -372,6 +380,47 @@ final class TranslatorAPI {
             },
             $protected
         );
+
+        // 3. Защищаем бренды и названия выставок из настройки protected_terms (отсортированы по убыванию длины)
+        $protected_terms = Settings::get_protected_terms();
+        if ( ! empty( $protected_terms ) ) {
+            $quoted_terms = array_map(
+                static fn( string $t ): string => preg_quote( $t, '/' ),
+                $protected_terms
+            );
+            $terms_pattern = '/(\[\[\d+\]\])|(?<![\p{L}\p{N}])(' . implode( '|', $quoted_terms ) . ')(?![\p{L}\p{N}])/iu';
+            $protected     = (string) preg_replace_callback(
+                $terms_pattern,
+                static function ( array $matches ) use ( &$counter, &$tokens_map ): string {
+                    if ( ! empty( $matches[1] ) ) {
+                        return $matches[1];
+                    }
+                    $idx                = $counter++;
+                    $tokens_map[ $idx ] = $matches[2];
+                    return '[[' . $idx . ']]';
+                },
+                $protected
+            );
+        }
+
+        // 4. При переводе между кириллическими языками (uk <-> ru) защищаем любые слова/фразы на латинице
+        $cyrillic_langs = [ 'uk', 'ru', 'be', 'bg', 'sr', 'mk' ];
+        $sl_base        = strtolower( substr( $sl, 0, 2 ) );
+        $tl_base        = strtolower( substr( $tl, 0, 2 ) );
+        if ( in_array( $sl_base, $cyrillic_langs, true ) && in_array( $tl_base, $cyrillic_langs, true ) ) {
+            $protected = (string) preg_replace_callback(
+                '/(\[\[\d+\]\])|(?<![a-zA-Z])([a-zA-Z]{2,}(?:[\s\-\/\.&]+[a-zA-Z0-9]{2,})*)(?![a-zA-Z])/u',
+                static function ( array $matches ) use ( &$counter, &$tokens_map ): string {
+                    if ( ! empty( $matches[1] ) ) {
+                        return $matches[1];
+                    }
+                    $idx                = $counter++;
+                    $tokens_map[ $idx ] = $matches[2];
+                    return '[[' . $idx . ']]';
+                },
+                $protected
+            );
+        }
 
         return $protected;
     }
@@ -429,16 +478,20 @@ final class TranslatorAPI {
 
         self::$last_stats['provider_label'] = 'Gemini ' . $model;
 
-        $user_prompt   = trim( (string) plu_get_option( 'system_prompt', '' ) );
-        $custom_prompt = trim( $custom_system_prompt );
-        $tech_prompt   = sprintf(
+        $user_prompt     = trim( (string) plu_get_option( 'system_prompt', '' ) );
+        $custom_prompt   = trim( $custom_system_prompt );
+        $protected_terms = Settings::get_protected_terms();
+        $protected_note  = ! empty( $protected_terms )
+            ? 'Do NOT translate, transliterate, or alter these protected brands and terms (keep exact spelling): ' . implode( ', ', $protected_terms ) . '.'
+            : '';
+        $tech_prompt     = sprintf(
             'Translate all values of the provided JSON object from language "%1$s" to language "%2$s". Return strictly a valid JSON object with the EXACT same keys ("k_0", "k_1", etc.). Keep all HTML tags, attributes (except translatable alt/title), URLs, and Rank Math variables (%%sep%%, %%sitename%%, %%title%%) untouched.',
             $sl,
             $tl
         );
 
         $prompt_parts = array_filter(
-            [ $user_prompt, $custom_prompt, $tech_prompt ],
+            [ $user_prompt, $custom_prompt, $protected_note, $tech_prompt ],
             static fn( string $part ): bool => '' !== $part
         );
         $full_system_instruction = implode( "\n\n", $prompt_parts );

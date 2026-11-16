@@ -35,7 +35,7 @@ final class BulkArchiveTranslator {
 	 *
 	 * @param string $title   Заголовок записи.
 	 * @param string $content Контент записи (HTML / Divi 5 / шорткоды).
-	 * @return string 'uk', 'ru', 'en' или 'empty'.
+	 * @return string 'uk', 'ru', 'en', 'cyrillic_neutral', 'universal' или 'empty'.
 	 */
 	public static function detect_real_text_language( string $title, string $content ): string {
 		$raw = $title . ' ' . $content;
@@ -57,51 +57,80 @@ final class BulkArchiveTranslator {
 		$clean = (string) preg_replace( '#https?://\S+#i', ' ', $clean );
 		$clean = (string) preg_replace( '/\s+/u', ' ', trim( $clean ) );
 
-		// Оставляем только буквы для проверки минимальной длины осмысленного текста
-		$letters_only = (string) preg_replace( '/[^\p{L}]+/u', '', $clean );
-		if ( mb_strlen( $letters_only, 'UTF-8' ) < 10 ) {
+		if ( '' === $clean ) {
 			return 'empty';
 		}
 
-		$cyr_count   = (int) preg_match_all( '/[\x{0400}-\x{04FF}]/u', $clean );
-		$latin_count = (int) preg_match_all( '/[a-zA-Z]/', $clean );
-
-		// Если латиницы больше чем кириллицы (и кириллицы почти нет) — это английский
-		if ( $latin_count > $cyr_count && $cyr_count < 5 ) {
-			return 'en';
-		}
-		if ( $latin_count > ( $cyr_count * 2 ) ) {
-			return 'en';
-		}
-
-		// Подсчет уникальных украинских и русских маркеров
-		$uk_unique_chars = (int) preg_match_all( '/[іїєґІЇЄҐ]/u', $clean );
-		$ru_unique_chars = (int) preg_match_all( '/[ыэъёЫЭЪЁ]/u', $clean );
-
-		$uk_words = (int) preg_match_all( '/(?<![\p{L}])(та|що|для|від|про|року|рік|або|якщо|буде|вони|його|неї|між|під|після|зараз|також|лише|більше|шановні|повідомляємо|працює|відкриття|наших|клієнтів)(?![\p{L}])/iu', $clean );
-		$ru_words = (int) preg_match_all( '/(?<![\p{L}])(или|что|был|была|были|году|год|также|только|если|будет|они|его|между|после|сейчас|более|котор[а-яё]*|этом|этого|наша|компания|лучшие|направления)(?![\p{L}])/iu', $clean );
-
-		$uk_score = ( $uk_unique_chars * 4 ) + ( $uk_words * 3 );
-		$ru_score = ( $ru_unique_chars * 4 ) + ( $ru_words * 3 );
-
-		if ( $uk_score > $ru_score ) {
-			return 'uk';
-		}
-		if ( $ru_score > $uk_score ) {
-			return 'ru';
+		// Предварительно вырезаем защищённые бренды и названия выставок (elcomUkraine, TM SCaT, SCaT и т.д.)
+		$clean_no_brands = $clean;
+		$protected_terms = \PolylangUp\Core\Settings::get_protected_terms();
+		if ( ! empty( $protected_terms ) ) {
+			$quoted_terms    = array_map( static fn( string $t ): string => preg_quote( $t, '/' ), $protected_terms );
+			$terms_pattern   = '/(?<![\p{L}\p{N}])(' . implode( '|', $quoted_terms ) . ')(?![\p{L}\p{N}])/iu';
+			$clean_no_brands = (string) preg_replace( $terms_pattern, ' ', $clean_no_brands );
+			$clean_no_brands = (string) preg_replace( '/\s+/u', ' ', trim( $clean_no_brands ) );
 		}
 
-		// Дополнительная эвристика, если текст очень короткий без уникальных букв
-		$char_i = (int) preg_match_all( '/[іІ]/u', $clean );
-		if ( $char_i > 0 ) {
-			return 'uk';
+		$letters_only = (string) preg_replace( '/[^\p{L}]+/u', '', $clean_no_brands );
+
+		// Если после вырезания брендов букв не осталось (например, «elcomUkraine 2014» + галерея),
+		// но сам заголовок/очищенный текст не пустой — это универсальное название (валидно для UK/EN/RU)
+		if ( '' === $letters_only ) {
+			$has_any_alnum = (bool) preg_match( '/[\p{L}\p{N}]/u', $clean );
+			return $has_any_alnum ? 'universal' : 'empty';
 		}
 
+		$cyr_count   = (int) preg_match_all( '/\p{Cyrillic}/u', $clean_no_brands );
+		$latin_count = (int) preg_match_all( '/[a-zA-Z]/', $clean_no_brands );
+
+		// Если в тексте есть ХОТЯ БЫ ОДНА кириллическая буква — он НИКОГДА не считается английским ('en')
 		if ( $cyr_count > 0 ) {
-			return 'ru';
+			// Подсчет уникальных украинских и русских маркеров
+			$uk_unique_chars = (int) preg_match_all( '/[іїєґІЇЄҐ]/u', $clean_no_brands );
+			$ru_unique_chars = (int) preg_match_all( '/[ыэъёЫЭЪЁ]/u', $clean_no_brands );
+
+			$uk_words = (int) preg_match_all( '/(?<![\p{L}])(ми|на\s+виставці|виставці|у\s+місті|місті|підсумки|новинки|семінар|виставка|та|що|для|від|про|року|рік|або|якщо|буде|вони|його|неї|між|під|після|зараз|також|лише|більше|шановні|повідомляємо|працює|відкриття|наших|клієнтів)(?![\p{L}])/iu', $clean_no_brands );
+			$ru_words = (int) preg_match_all( '/(?<![\p{L}])(мы|на\s+выставке|выставке|выставка|итоги|городе|семинар|или|что|был|была|были|году|год|также|только|если|будет|они|его|между|после|сейчас|более|котор[а-яё]*|этом|этого|наша|компания|лучшие|направления)(?![\p{L}])/iu', $clean_no_brands );
+
+			$uk_score = ( $uk_unique_chars * 4 ) + ( $uk_words * 3 );
+			$ru_score = ( $ru_unique_chars * 4 ) + ( $ru_words * 3 );
+
+			if ( $uk_score > $ru_score ) {
+				return 'uk';
+			}
+			if ( $ru_score > $uk_score ) {
+				return 'ru';
+			}
+
+			// Ни специфических русских (ы, э, ъ, ё), ни украинских (і, ї, є, ґ) маркеров нет
+			return 'cyrillic_neutral';
 		}
 
-		return $latin_count > 0 ? 'en' : 'empty';
+		// Кириллицы нет, анализируем латиницу (бренды уже вырезаны)
+		if ( $latin_count >= 2 ) {
+			return 'en';
+		}
+
+		return 'empty';
+	}
+
+	/**
+	 * Проверяет, совместим ли определённый детектором язык текста с паспортным языком поста в Polylang.
+	 *
+	 * @param string $assigned_lang Паспортный код языка Polylang ('uk', 'ru', 'en' и т.д.).
+	 * @param string $detected_lang Результат detect_real_text_language().
+	 * @return bool
+	 */
+	public static function is_lang_compatible_with_detected( string $assigned_lang, string $detected_lang ): bool {
+		if ( 'universal' === $detected_lang ) {
+			return true;
+		}
+
+		if ( 'cyrillic_neutral' === $detected_lang ) {
+			return in_array( strtolower( substr( $assigned_lang, 0, 2 ) ), [ 'uk', 'ru', 'be', 'bg', 'sr', 'mk' ], true );
+		}
+
+		return $assigned_lang === $detected_lang;
 	}
 
 	/**
@@ -736,7 +765,7 @@ final class BulkArchiveTranslator {
 
 		$matrix         = [];
 		$group_post_ids = [ $post->ID ];
-		$has_mismatch   = ( '' !== $assigned_lang && 'empty' !== $real_lang && $assigned_lang !== $real_lang );
+		$has_mismatch   = ( '' !== $assigned_lang && 'empty' !== $real_lang && ! self::is_lang_compatible_with_detected( $assigned_lang, $real_lang ) );
 		$missing_langs  = 0;
 		$empty_langs    = 0;
 		$slug_dirty     = ( $raw_slug !== $clean_slug );
@@ -779,7 +808,7 @@ final class BulkArchiveTranslator {
 			if ( 'empty' === $t_real_lang ) {
 				$state = 'empty';
 				$empty_langs++;
-			} elseif ( $t_real_lang !== $l_slug ) {
+			} elseif ( ! self::is_lang_compatible_with_detected( $l_slug, $t_real_lang ) ) {
 				$state        = 'mismatch';
 				$has_mismatch = true;
 			} else {
@@ -1102,6 +1131,17 @@ final class BulkArchiveTranslator {
 			return new \WP_Error( 'plu_empty_post', __( 'В записи и её переводах нет текста для перевода (контент пустой).', 'polyland-up' ) );
 		}
 
+		// Если эталонный текст нейтральный ('universal' или 'cyrillic_neutral'),
+		// в качестве конкретного языка источника берём совместимый паспортный язык
+		$is_entry_mismatch = ! self::is_lang_compatible_with_detected( $entry_assigned_lang, $true_source_lang );
+		if ( in_array( $true_source_lang, [ 'universal', 'cyrillic_neutral' ], true ) ) {
+			if ( ! $is_entry_mismatch ) {
+				$true_source_lang = $entry_assigned_lang;
+			} else {
+				$true_source_lang = ( 'cyrillic_neutral' === $true_source_lang ) ? 'uk' : $entry_assigned_lang;
+			}
+		}
+
 		// Определяем эталонную историческую дату публикации (самая ранняя валидная дата в группе или дата исходного поста)
 		$canonical_date     = $entry_post->post_date;
 		$canonical_date_gmt = ( ! empty( $entry_post->post_date_gmt ) && '0000-00-00 00:00:00' !== $entry_post->post_date_gmt )
@@ -1112,14 +1152,14 @@ final class BulkArchiveTranslator {
 
 		// 3. ШАГ А: Если обнаружена пересортица (например, в посте UK лежит русский текст $true_source_lang = 'ru')
 		// Сначала гарантируем сохранение оригинала в посте языка $true_source_lang в режиме clone_only (0 токенов!)
-		if ( $fix_language_mismatch && $true_source_lang !== $entry_assigned_lang && in_array( $true_source_lang, $lang_slugs, true ) ) {
+		if ( $fix_language_mismatch && $is_entry_mismatch && $true_source_lang !== $entry_assigned_lang && in_array( $true_source_lang, $lang_slugs, true ) ) {
 			$existing_orig_lang_post = $group_posts[ $true_source_lang ] ?? null;
 			$existing_orig_real_lang = $group_real_langs[ $true_source_lang ] ?? 'empty';
 
 			$need_clone_original = (
 				null === $existing_orig_lang_post
 				|| 'empty' === $existing_orig_real_lang
-				|| $existing_orig_real_lang !== $true_source_lang
+				|| ! self::is_lang_compatible_with_detected( $true_source_lang, $existing_orig_real_lang )
 				|| 'force_all' === $overwrite_policy
 			);
 
@@ -1204,7 +1244,7 @@ final class BulkArchiveTranslator {
 			$existing_real_lang = $group_real_langs[ $target_lang ] ?? 'empty';
 
 			// В умном режиме (smart) пропускаем версии, где уже лежит валидный текст на нужном языке
-			if ( 'smart' === $overwrite_policy && null !== $existing_post && $existing_real_lang === $target_lang ) {
+			if ( 'smart' === $overwrite_policy && null !== $existing_post && self::is_lang_compatible_with_detected( $target_lang, $existing_real_lang ) ) {
 				$actions_log[] = sprintf(
 					__( '[%1$s] Пропущен (#%2$d уже на %1$s)', 'polyland-up' ),
 					strtoupper( $target_lang ),

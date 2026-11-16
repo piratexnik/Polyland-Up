@@ -913,13 +913,23 @@
                 `).fadeIn(150);
             };
 
+            const formatDetectedLangLabel = function(rLang) {
+                if (rLang === 'universal') {
+                    return 'Универсальный';
+                }
+                if (rLang === 'cyrillic_neutral') {
+                    return 'Кириллица';
+                }
+                return String(rLang || '').toUpperCase();
+            };
+
             const renderLangCellHtml = function(langSlug, cellData) {
                 if (!cellData || cellData.state === 'missing' || !cellData.post_id) {
                     return `<div class="plu-matrix-cell is-missing">&#10060; Нет поста</div>`;
                 }
 
                 const pid = esc(cellData.post_id);
-                const rLang = esc(String(cellData.real_lang || '').toUpperCase());
+                const rLangLabel = esc(formatDetectedLangLabel(cellData.real_lang));
                 const editLink = cellData.edit_url
                     ? `<a href="${esc(cellData.edit_url)}" target="_blank" rel="noopener noreferrer" title="Открыть в редакторе">#${pid}</a>`
                     : `#${pid}`;
@@ -931,9 +941,9 @@
                     return `<div class="plu-matrix-cell is-empty">&#11093; ${editLink} (Пустой)${unlinkedBadge}</div>`;
                 }
                 if (cellData.state === 'mismatch') {
-                    return `<div class="plu-matrix-cell is-mismatch">&#9888;&#65039; ${editLink} (Внутри текст: <strong>${rLang}!</strong>)${unlinkedBadge}</div>`;
+                    return `<div class="plu-matrix-cell is-mismatch">&#9888;&#65039; ${editLink} (Текст: <strong>${rLangLabel}!</strong>)${unlinkedBadge}</div>`;
                 }
-                return `<div class="plu-matrix-cell is-ok">&#9989; ${editLink} (Текст: ${rLang})${unlinkedBadge}</div>`;
+                return `<div class="plu-matrix-cell is-ok">&#9989; ${editLink} (${rLangLabel})${unlinkedBadge}</div>`;
             };
 
             const renderAuditRowHtml = function(row, markDoneSummary) {
@@ -949,14 +959,21 @@
 
                 // Колонка Паспорт Polylang vs Реальный язык текста
                 const assignedUpper = esc(String(row.assigned_lang || '?').toUpperCase());
-                const realUpper = esc(String(row.real_lang || 'empty').toUpperCase());
+                const realLabel = esc(formatDetectedLangLabel(row.real_lang || 'empty'));
                 let langDetectHtml = '';
                 if (row.real_lang === 'empty') {
                     langDetectHtml = `<span class="plu-detect-badge is-empty">Паспорт: <strong>${assignedUpper}</strong> &rarr; &#11093; Пустой</span>`;
+                } else if (row.real_lang === 'universal') {
+                    langDetectHtml = `<span class="plu-detect-badge is-ok">Паспорт: <strong>${assignedUpper}</strong> &rarr; &#9989; <strong>Универсальный</strong></span>`;
+                } else if (row.real_lang === 'cyrillic_neutral') {
+                    const isCyrOk = ['uk', 'ru', 'be', 'bg', 'sr', 'mk'].includes(String(row.assigned_lang || '').toLowerCase().slice(0, 2));
+                    langDetectHtml = isCyrOk
+                        ? `<span class="plu-detect-badge is-ok">Паспорт: <strong>${assignedUpper}</strong> &rarr; &#9989; <strong>Кириллица</strong></span>`
+                        : `<span class="plu-detect-badge is-mismatch">Паспорт: <strong>${assignedUpper}</strong> &rarr; &#9888;&#65039; <strong>Кириллица!</strong></span>`;
                 } else if (row.assigned_lang !== row.real_lang) {
-                    langDetectHtml = `<span class="plu-detect-badge is-mismatch">Паспорт: <strong>${assignedUpper}</strong> &rarr; &#9888;&#65039; Реальный текст: <strong>${realUpper}!</strong></span>`;
+                    langDetectHtml = `<span class="plu-detect-badge is-mismatch">Паспорт: <strong>${assignedUpper}</strong> &rarr; &#9888;&#65039; Реальный текст: <strong>${realLabel}!</strong></span>`;
                 } else {
-                    langDetectHtml = `<span class="plu-detect-badge is-ok">Паспорт: <strong>${assignedUpper}</strong> &rarr; &#9989; Текст: <strong>${realUpper}</strong></span>`;
+                    langDetectHtml = `<span class="plu-detect-badge is-ok">Паспорт: <strong>${assignedUpper}</strong> &rarr; &#9989; Текст: <strong>${realLabel}</strong></span>`;
                 }
 
                 if (row.has_unlinked) {
