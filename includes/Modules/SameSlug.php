@@ -213,6 +213,40 @@ final class SameSlug {
     }
 
     /**
+     * Нормализация URL-слага от языковых вставок мигратора (-ru, -en, -uk, -ua)
+     * с сохранением порядкового номера статьи за день (-2, -3).
+     * Примеры:
+     * - article-2019-04-17-ru-2 -> article-2019-04-17-2
+     * - article-2019-04-17-2-en -> article-2019-04-17-2
+     * - article-2019-04-17-uk   -> article-2019-04-17
+     *
+     * @param string $slug Исходный слаг записи.
+     * @return string Очищенный слаг.
+     */
+    public static function normalize_clean_slug( string $slug ): string {
+        $clean = strtolower( trim( $slug ) );
+        if ( '' === $clean ) {
+            return '';
+        }
+
+        // 1. Вырезаем языковой инфикс перед числовым суффиксом (-ru-2 -> -2, -en-3 -> -3)
+        do {
+            $prev  = $clean;
+            $clean = (string) preg_replace( '/-(?:ru|en|uk|ua)-(\d+)$/i', '-$1', $clean );
+        } while ( $clean !== $prev );
+
+        // 2. Вырезаем языковой суффикс в конце слага (...-2-en -> ...-2, ...-uk -> ...)
+        do {
+            $prev  = $clean;
+            $clean = (string) preg_replace( '/-(?:ru|en|uk|ua)$/i', '', $clean );
+        } while ( $clean !== $prev );
+
+        $clean = trim( $clean, '-' );
+
+        return '' !== $clean ? $clean : strtolower( trim( $slug ) );
+    }
+
+    /**
      * Проверка, занят ли слаг записью того же языка (с учетом фидов и иерархии).
      *
      * @param string $check_slug  Проверяемый слаг.

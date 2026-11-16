@@ -157,31 +157,6 @@
     color: #135e96;
 }
 
-.plu-swap-lang-box {
-    background: #fffbeb;
-    border: 1px solid #f59e0b;
-    border-radius: 4px;
-    padding: 8px 10px;
-}
-
-.plu-swap-lang-box .plu-option-checkbox {
-    font-size: 12px;
-    line-height: 1.4;
-}
-
-.plu-swap-actual-lang-body {
-    margin-top: 6px;
-    padding-top: 6px;
-    border-top: 1px dashed #fcd34d;
-}
-
-.plu-swap-hint {
-    margin: 6px 0 0 !important;
-    font-size: 11px !important;
-    line-height: 1.45;
-    color: #78350f !important;
-}
-
 .plu-metabox-section {
     margin-bottom: 12px;
 }
@@ -833,4 +808,311 @@
     border: 1px solid transparent;
     padding-left: 0;
     padding-right: 0;
+}
+
+/* ========================================================
+ * Bulk Archive Translator & Revision Tab
+ * ======================================================== */
+.plu-bulk-archive-wrap {
+    max-width: 1280px;
+}
+
+.plu-bulk-card {
+    background: #ffffff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    padding: 20px 24px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    margin-bottom: 20px;
+}
+
+.plu-bulk-filter-card {
+    border-left: 4px solid #2271b1;
+}
+
+.plu-bulk-settings-card {
+    border-left: 4px solid #00a32a;
+}
+
+.plu-bulk-filters-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1.6fr auto;
+    gap: 14px;
+    align-items: end;
+}
+
+@media (max-width: 960px) {
+    .plu-bulk-filters-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.plu-bulk-filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.plu-bulk-cat-bar {
+    margin-top: 16px;
+    padding: 12px 16px;
+    background: #f0f6fc;
+    border: 1px solid #c5d9ed;
+    border-radius: 4px;
+}
+
+.plu-cat-bar-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.plu-cat-bar-pills {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.plu-cat-lang-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+}
+
+.plu-cat-lang-pill.is-ok {
+    background: #edfaef;
+    color: #1a7a28;
+    border: 1px solid #c2ebd0;
+}
+
+.plu-cat-lang-pill.is-missing {
+    background: #fef0f0;
+    color: #a02020;
+    border: 1px solid #f5c2c7;
+}
+
+.plu-cat-sep {
+    color: #a7aaad;
+}
+
+.plu-bulk-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+    margin-bottom: 16px;
+}
+
+.plu-bulk-langs-checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-top: 4px;
+}
+
+.plu-bulk-lang-cb-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.plu-bulk-Checkboxes-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    background: #f6f7f7;
+    border: 1px solid #e2e4e7;
+    border-radius: 4px;
+    margin-bottom: 16px;
+}
+
+.plu-bulk-run-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+}
+
+.plu-bulk-summary-counter {
+    font-size: 13px;
+    color: #2c3338;
+}
+
+.plu-bulk-progress-wrap {
+    margin-top: 16px;
+    padding: 12px 14px;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+}
+
+.plu-bulk-progress-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #1e293b;
+}
+
+.plu-bulk-progress-track {
+    width: 100%;
+    height: 12px;
+    background: #e2e8f0;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.plu-bulk-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #2271b1, #00a32a);
+    transition: width 0.25s ease;
+}
+
+.plu-bulk-table-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.plu-bulk-scan-stats {
+    font-size: 13px;
+    color: #50575e;
+    background: #f6f7f7;
+    padding: 6px 12px;
+    border-radius: 4px;
+    border: 1px solid #dcdcde;
+}
+
+.plu-bulk-table td,
+.plu-bulk-table th {
+    vertical-align: middle;
+}
+
+.plu-bulk-lang-col {
+    width: 13%;
+}
+
+.plu-bulk-post-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+    color: #646970;
+    margin-bottom: 3px;
+}
+
+.plu-bulk-id {
+    font-weight: 600;
+    color: #2271b1;
+}
+
+.plu-slug-clean-badge {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #996800;
+    background: #fcf9e8;
+    border: 1px solid #f0c33c;
+    border-radius: 3px;
+    padding: 2px 6px;
+    display: inline-block;
+}
+
+.plu-detect-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.plu-detect-badge.is-ok {
+    background: #edfaef;
+    color: #1a7a28;
+    border: 1px solid #c2ebd0;
+}
+
+.plu-detect-badge.is-mismatch {
+    background: #fffbeb;
+    color: #92400e;
+    border: 1px solid #f59e0b;
+}
+
+.plu-detect-badge.is-empty {
+    background: #f0f0f1;
+    color: #646970;
+    border: 1px solid #dcdcde;
+}
+
+.plu-unlinked-alert,
+.plu-unlinked-hint {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #135e96;
+    font-weight: 600;
+}
+
+.plu-matrix-cell {
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.plu-matrix-cell.is-ok {
+    background: #edfaef;
+    color: #1a7a28;
+    border: 1px solid #c2ebd0;
+}
+
+.plu-matrix-cell.is-mismatch {
+    background: #fffbeb;
+    color: #92400e;
+    border: 1px solid #f59e0b;
+}
+
+.plu-matrix-cell.is-empty {
+    background: #f6f7f7;
+    color: #646970;
+    border: 1px solid #dcdcde;
+}
+
+.plu-matrix-cell.is-missing {
+    background: #fef0f0;
+    color: #a02020;
+    border: 1px solid #f5c2c7;
+}
+
+.plu-bulk-row.is-complete td {
+    background-color: #f6fdf7 !important;
+}
+
+.plu-bulk-row.is-processing td {
+    background-color: #f0f6fc !important;
+}
+
+.plu-row-done-banner {
+    margin-top: 5px;
+    padding: 3px 8px;
+    background: #edfaef;
+    border-left: 3px solid #00a32a;
+    color: #1a7a28;
+    font-size: 11.5px;
+    border-radius: 2px;
 }

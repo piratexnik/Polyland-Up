@@ -196,11 +196,6 @@
             const $overwriteCb = $('#plu_overwrite_existing');
             const $spinner = $('#plu-duplicator-spinner');
             const $logBox = $('#plu-duplicator-log');
-            const $swapCb = $('#plu-swap-actual-lang');
-            const $swapBody = $('#plu-swap-actual-lang-body');
-            const $actualLangSelect = $('#plu_actual_content_lang');
-            const $swapHint = $('#plu-swap-hint');
-            const assignedLang = String($box.attr('data-assigned-lang') || '').toLowerCase();
 
             // Проверка необходимости показа галочки подтверждения перезаписи
             const toggleOverwriteVisibility = function() {
@@ -220,68 +215,7 @@
                 }
             };
 
-            const updateSwapHint = function() {
-                if (!$swapHint.length || !$swapCb.is(':checked')) {
-                    return;
-                }
-                const actualSlug = String($actualLangSelect.val() || '').toLowerCase();
-                const actualUpper = esc(actualSlug.toUpperCase());
-                const assignedUpper = esc(assignedLang.toUpperCase());
-                const otherSelected = [];
-
-                $box.find('.plu-target-lang-cb:checked').each(function() {
-                    const slug = String($(this).val() || '').toLowerCase();
-                    if (slug && slug !== actualSlug) {
-                        otherSelected.push(slug.toUpperCase());
-                    }
-                });
-
-                let hint = `1) Текущий текст без перевода сохранится в языковую версию <strong>[${actualUpper}]</strong>. `
-                    + `2) Сама текущая запись <strong>[${assignedUpper}]</strong> будет переведена с [${actualUpper}] на [${assignedUpper}].`;
-
-                if (otherSelected.length > 0) {
-                    hint += ` 3) Остальные отмеченные языки (<strong>[${esc(otherSelected.join(', '))}]</strong>) также будут переведены с [${actualUpper}].`;
-                }
-
-                $swapHint.html(hint);
-            };
-
-            $swapCb.on('change', function() {
-                if ($(this).is(':checked')) {
-                    $swapBody.slideDown(150);
-
-                    // Автоматически отмечаем все целевые языки (включая actual_content_lang)
-                    let hasExisting = false;
-                    $box.find('.plu-target-lang-cb').each(function() {
-                        $(this).prop('checked', true);
-                        if (String($(this).attr('data-exists')) === '1') {
-                            hasExisting = true;
-                        }
-                    });
-
-                    toggleOverwriteVisibility();
-                    if (hasExisting) {
-                        $overwriteCb.prop('checked', true);
-                    }
-
-                    // Если стоял режим без перевода, переключаем на переводчик по умолчанию
-                    const $modeSelect = $('#plu_mode');
-                    if ($modeSelect.val() === 'clone_only') {
-                        const defMode = String($box.attr('data-default-mode') || 'translate_gtx');
-                        $modeSelect.val(defMode);
-                    }
-
-                    updateSwapHint();
-                } else {
-                    $swapBody.slideUp(150);
-                }
-            });
-
-            $actualLangSelect.on('change', updateSwapHint);
-            $box.on('change', '.plu-target-lang-cb', function() {
-                toggleOverwriteVisibility();
-                updateSwapHint();
-            });
+            $box.on('change', '.plu-target-lang-cb', toggleOverwriteVisibility);
             toggleOverwriteVisibility();
 
             // Последовательная обработка выбранных языков
@@ -293,15 +227,6 @@
                     $logBox.append(
                         `<div class="plu-log-item is-success"><strong>&#127881; ${esc(i18n.finished_all || 'Обработка завершена.')}</strong></div>`
                     );
-
-                    if (params.selfUpdatedLang) {
-                        $logBox.append(
-                            `<div class="plu-log-item is-success" style="margin-top:6px;">` +
-                            `<button type="button" class="button button-primary" style="width:100%;" onclick="window.location.reload()">` +
-                            `&#128260; Обновить страницу редактора (текст переведен на ${esc(params.selfUpdatedLang)})` +
-                            `</button></div>`
-                        );
-                    }
                     return;
                 }
 
@@ -309,14 +234,9 @@
                 const stepNum = index + 1;
                 const totalNum = queue.length;
                 const langCodeUpper = esc(langItem.slug.toUpperCase());
-                const rowId = 'plu-log-step-' + (langItem.isSelfTranslate ? 'self-' : '') + langItem.slug;
+                const rowId = 'plu-log-step-' + langItem.slug;
 
-                let processingText = `${esc(i18n.processing_lang || 'Обработка языка')} ${langCodeUpper} (${stepNum} ${esc(i18n.of || 'из')} ${totalNum})...`;
-                if (langItem.isOriginalTransfer) {
-                    processingText = `Перенос оригинала в ${langCodeUpper} (${stepNum} ${esc(i18n.of || 'из')} ${totalNum})...`;
-                } else if (langItem.isSelfTranslate) {
-                    processingText = `Перевод самой текущей записи в ${langCodeUpper} (${stepNum} ${esc(i18n.of || 'из')} ${totalNum})...`;
-                }
+                const processingText = `${esc(i18n.processing_lang || 'Обработка языка')} ${langCodeUpper} (${stepNum} ${esc(i18n.of || 'из')} ${totalNum})...`;
 
                 $logBox.append(
                     `<div class="plu-log-item" id="${esc(rowId)}">&#9203; ${processingText}</div>`
@@ -326,20 +246,13 @@
                     action: 'plu_duplicate_post',
                     nonce: pluAdminData.clone_nonce,
                     post_id: params.postId,
+                    target_lang: langItem.slug,
                     mode: params.mode,
                     keep_same_slug: params.keepSameSlug ? 1 : 0,
                     rewrite_links: params.rewriteLinks ? 1 : 0,
                     target_status: params.targetStatus,
-                    overwrite_existing: params.overwriteExisting ? 1 : 0,
-                    swap_actual_lang: params.swapActualLang ? 1 : 0,
-                    actual_content_lang: params.actualContentLang || ''
+                    overwrite_existing: params.overwriteExisting ? 1 : 0
                 };
-
-                if (langItem.isSelfTranslate) {
-                    ajaxData.self_translate = 1;
-                } else {
-                    ajaxData.target_lang = langItem.slug;
-                }
 
                 $.ajax({
                     url: pluAdminData.ajax_url,
@@ -351,13 +264,7 @@
 
                         if (response.success && response.data) {
                             const d = response.data;
-                            if (d.self_updated) {
-                                params.selfUpdatedLang = d.lang_upper || langCodeUpper;
-                            }
-
-                            const actionLabel = d.self_updated
-                                ? 'текущая запись обновлена!'
-                                : (d.updated ? (i18n.done_updated || 'обновлён!') : (i18n.done_created || 'готов!'));
+                            const actionLabel = d.updated ? (i18n.done_updated || 'обновлён!') : (i18n.done_created || 'готов!');
                             const summaryHtml = d.translation_summary
                                 ? ` <span class="plu-log-summary">— ${esc(d.translation_summary)}.</span>`
                                 : '';
@@ -382,23 +289,21 @@
                             $stepRow.addClass('is-success').html(resultHtml);
 
                             // Обновляем статус-бейдж и быстрые ссылки в списке языков без перезагрузки страницы
-                            if (!langItem.isSelfTranslate) {
-                                const $langRow = $box.find(`.plu-lang-row[data-lang-row="${langItem.slug}"]`);
-                                if ($langRow.length) {
-                                    $langRow.removeClass('is-missing').addClass('is-existing');
-                                    $langRow.find('.plu-target-lang-cb')
-                                        .attr('data-exists', '1')
-                                        .prop('checked', false);
+                            const $langRow = $box.find(`.plu-lang-row[data-lang-row="${langItem.slug}"]`);
+                            if ($langRow.length) {
+                                $langRow.removeClass('is-missing').addClass('is-existing');
+                                $langRow.find('.plu-target-lang-cb')
+                                    .attr('data-exists', '1')
+                                    .prop('checked', false);
 
-                                    const statusText = d.status === 'publish' ? 'Опубликовано' : 'Черновик';
-                                    $langRow.find('.plu-lang-meta-row').html(`
-                                        <span class="plu-badge plu-badge-neutral">Уже есть: #${esc(d.post_id)} (${esc(statusText)})</span>
-                                        <span class="plu-lang-quick-links">
-                                            <a href="${esc(d.edit_url)}" title="Редактировать перевод" target="_blank" rel="noopener noreferrer"><span class="dashicons dashicons-edit"></span></a>
-                                            <a href="${esc(d.view_url)}" title="Открыть перевод" target="_blank" rel="noopener noreferrer"><span class="dashicons dashicons-visibility"></span></a>
-                                        </span>
-                                    `);
-                                }
+                                const statusText = d.status === 'publish' ? 'Опубликовано' : 'Черновик';
+                                $langRow.find('.plu-lang-meta-row').html(`
+                                    <span class="plu-badge plu-badge-neutral">Уже есть: #${esc(d.post_id)} (${esc(statusText)})</span>
+                                    <span class="plu-lang-quick-links">
+                                        <a href="${esc(d.edit_url)}" title="Редактировать перевод" target="_blank" rel="noopener noreferrer"><span class="dashicons dashicons-edit"></span></a>
+                                        <a href="${esc(d.view_url)}" title="Открыть перевод" target="_blank" rel="noopener noreferrer"><span class="dashicons dashicons-visibility"></span></a>
+                                    </span>
+                                `);
                             }
                         } else {
                             const errMsg = (response.data && response.data.message) ? response.data.message : 'Ошибка при клонировании.';
@@ -426,10 +331,8 @@
             $runBtn.on('click', function(e) {
                 e.preventDefault();
 
-                let queue = [];
+                const queue = [];
                 let hasExistingSelected = false;
-                const swapActualLang = $swapCb.is(':checked');
-                const actualContentLang = swapActualLang ? String($actualLangSelect.val() || '').toLowerCase() : '';
 
                 $box.find('.plu-target-lang-cb:checked').each(function() {
                     const $cb = $(this);
@@ -441,26 +344,9 @@
                     queue.push({
                         slug: slug,
                         name: String($cb.attr('data-lang-name') || slug),
-                        exists: isExisting,
-                        isOriginalTransfer: swapActualLang && slug === actualContentLang
+                        exists: isExisting
                     });
                 });
-
-                if (swapActualLang && actualContentLang) {
-                    // Перенос оригинала ставим первым, остальные переводы — после, и в конце — перевод самой открытой записи
-                    const origItems = queue.filter(item => item.isOriginalTransfer);
-                    const otherItems = queue.filter(item => !item.isOriginalTransfer);
-                    queue = origItems.concat(otherItems);
-
-                    if (assignedLang && assignedLang !== actualContentLang) {
-                        queue.push({
-                            slug: assignedLang,
-                            name: assignedLang.toUpperCase(),
-                            exists: true,
-                            isSelfTranslate: true
-                        });
-                    }
-                }
 
                 $logBox.empty().show();
 
@@ -481,10 +367,7 @@
                     keepSameSlug: $('#plu_keep_same_slug').is(':checked'),
                     rewriteLinks: $('#plu_rewrite_links').is(':checked'),
                     targetStatus: String($('#plu_target_status').val() || 'draft'),
-                    overwriteExisting: overwriteExisting,
-                    swapActualLang: swapActualLang,
-                    actualContentLang: actualContentLang,
-                    selfUpdatedLang: ''
+                    overwriteExisting: overwriteExisting
                 };
 
                 $runBtn.prop('disabled', true);
@@ -958,6 +841,499 @@
             $('#plu_rm_style').on('change', function() {
                 const style = String($(this).val() || 'outline');
                 $previewRmBtn.removeClass('plu-rm-style-solid plu-rm-style-outline plu-rm-style-link').addClass('plu-rm-style-' + style);
+            });
+        }
+
+        // ============================================================
+        // 7. Логика вкладки «🗂 Пакетный перевод и Ревизия архива»
+        // ============================================================
+        const $bulkBox = $('#plu-bulk-archive-box');
+        if ($bulkBox.length) {
+            const $scanBtn = $('#plu-bulk-scan-btn');
+            const $scanSpinner = $('#plu-bulk-scan-spinner');
+            const $catStatusBar = $('#plu-bulk-category-status-bar');
+            const $tbody = $('#plu-bulk-tbody');
+            const $selectAllCb = $('#plu-bulk-select-all');
+            const $startBtn = $('#plu-bulk-start-btn');
+            const $stopBtn = $('#plu-bulk-stop-btn');
+            const $summaryCounter = $('#plu-bulk-summary-counter');
+            const $scanStats = $('#plu-bulk-scan-stats');
+            const $progressWrap = $('#plu-bulk-progress-wrap');
+            const $progressLabel = $('#plu-bulk-progress-label');
+            const $progressPercent = $('#plu-bulk-progress-percent');
+            const $progressBar = $('#plu-bulk-progress-bar');
+            const $processLog = $('#plu-bulk-process-log');
+
+            let activeLangs = [];
+            try {
+                activeLangs = JSON.parse($bulkBox.attr('data-langs') || '["uk","en","ru"]');
+            } catch (e) {
+                activeLangs = ['uk', 'en', 'ru'];
+            }
+
+            let isBulkRunning = false;
+            let stopRequested = false;
+            let pauseTimer = null;
+
+            const renderCategoryStatusBar = function(catInfo) {
+                if (!catInfo || !catInfo.cat_id) {
+                    $catStatusBar.hide().empty();
+                    return;
+                }
+
+                const parts = [];
+                const matrix = catInfo.matrix || {};
+
+                activeLangs.forEach(function(langSlug) {
+                    const lUpper = esc(langSlug.toUpperCase());
+                    const item = matrix[langSlug];
+                    if (item && item.exists) {
+                        parts.push(`<span class="plu-cat-lang-pill is-ok"><strong>${lUpper}</strong> ${esc(item.name)} (ID: ${esc(item.term_id)})</span>`);
+                    } else {
+                        parts.push(`<span class="plu-cat-lang-pill is-missing"><strong>${lUpper}</strong> &#10060; Нет связанной рубрики</span>`);
+                    }
+                });
+
+                let fixBtnHtml = '';
+                if (catInfo.has_missing) {
+                    fixBtnHtml = `
+                        <button type="button" class="button button-secondary plu-bulk-fix-cat-btn" data-cat-id="${esc(catInfo.cat_id)}">
+                            &#10133; Создать/связать недостающие языковые рубрики в 1 клик
+                        </button>
+                    `;
+                }
+
+                $catStatusBar.html(`
+                    <div class="plu-cat-bar-inner">
+                        <div class="plu-cat-bar-pills">
+                            <strong>Связи рубрики в Polylang:</strong> ${parts.join(' <span class="plu-cat-sep">|</span> ')}
+                        </div>
+                        <div class="plu-cat-bar-actions">${fixBtnHtml}</div>
+                    </div>
+                `).fadeIn(150);
+            };
+
+            const renderLangCellHtml = function(langSlug, cellData) {
+                if (!cellData || cellData.state === 'missing' || !cellData.post_id) {
+                    return `<div class="plu-matrix-cell is-missing">&#10060; Нет поста</div>`;
+                }
+
+                const pid = esc(cellData.post_id);
+                const rLang = esc(String(cellData.real_lang || '').toUpperCase());
+                const editLink = cellData.edit_url
+                    ? `<a href="${esc(cellData.edit_url)}" target="_blank" rel="noopener noreferrer" title="Открыть в редакторе">#${pid}</a>`
+                    : `#${pid}`;
+                const unlinkedBadge = cellData.is_unlinked
+                    ? `<div class="plu-unlinked-hint">&#128279; Не связан (найден по слагу)</div>`
+                    : '';
+
+                if (cellData.state === 'empty') {
+                    return `<div class="plu-matrix-cell is-empty">&#11093; ${editLink} (Пустой)${unlinkedBadge}</div>`;
+                }
+                if (cellData.state === 'mismatch') {
+                    return `<div class="plu-matrix-cell is-mismatch">&#9888;&#65039; ${editLink} (Внутри текст: <strong>${rLang}!</strong>)${unlinkedBadge}</div>`;
+                }
+                return `<div class="plu-matrix-cell is-ok">&#9989; ${editLink} (Текст: ${rLang})${unlinkedBadge}</div>`;
+            };
+
+            const renderAuditRowHtml = function(row, markDoneSummary) {
+                const postId = esc(row.post_id);
+                const rowClass = (row.is_complete || markDoneSummary) ? 'plu-bulk-row is-complete' : (row.has_mismatch ? 'plu-bulk-row is-mismatch' : 'plu-bulk-row');
+                const checkedAttr = (!row.is_complete && !markDoneSummary) ? 'checked="checked"' : '';
+
+                // Колонка слага
+                let slugHtml = `<div><code>${esc(row.current_slug)}</code></div>`;
+                if (row.slug_needs_clean) {
+                    slugHtml += `<div class="plu-slug-clean-badge">&#129529; Будет очищен &rarr; <code>${esc(row.clean_slug)}</code></div>`;
+                }
+
+                // Колонка Паспорт Polylang vs Реальный язык текста
+                const assignedUpper = esc(String(row.assigned_lang || '?').toUpperCase());
+                const realUpper = esc(String(row.real_lang || 'empty').toUpperCase());
+                let langDetectHtml = '';
+                if (row.real_lang === 'empty') {
+                    langDetectHtml = `<span class="plu-detect-badge is-empty">Паспорт: <strong>${assignedUpper}</strong> &rarr; &#11093; Пустой</span>`;
+                } else if (row.assigned_lang !== row.real_lang) {
+                    langDetectHtml = `<span class="plu-detect-badge is-mismatch">Паспорт: <strong>${assignedUpper}</strong> &rarr; &#9888;&#65039; Реальный текст: <strong>${realUpper}!</strong></span>`;
+                } else {
+                    langDetectHtml = `<span class="plu-detect-badge is-ok">Паспорт: <strong>${assignedUpper}</strong> &rarr; &#9989; Текст: <strong>${realUpper}</strong></span>`;
+                }
+
+                if (row.has_unlinked) {
+                    langDetectHtml += `<div class="plu-unlinked-alert">&#128279; Найдена несвязанная пара по слагу!</div>`;
+                }
+
+                let matrixCells = '';
+                activeLangs.forEach(function(lSlug) {
+                    const cell = (row.matrix && row.matrix[lSlug]) ? row.matrix[lSlug] : null;
+                    matrixCells += `<td>${renderLangCellHtml(lSlug, cell)}</td>`;
+                });
+
+                const doneBanner = markDoneSummary
+                    ? `<div class="plu-row-done-banner">&#9989; Готово: ${esc(markDoneSummary)}</div>`
+                    : '';
+
+                return `
+                    <tr class="${rowClass}" id="plu-bulk-row-${postId}" data-post-id="${postId}">
+                        <th scope="row" class="check-column">
+                            <input type="checkbox" class="plu-bulk-row-cb" value="${postId}" ${checkedAttr} />
+                        </th>
+                        <td>
+                            <div class="plu-bulk-post-meta">
+                                <span class="plu-bulk-id">#${postId}</span>
+                                <span class="plu-bulk-date">&#128197; ${esc(row.date)}</span>
+                            </div>
+                            <div class="plu-bulk-post-title">
+                                <a href="${esc(row.edit_url)}" target="_blank" rel="noopener noreferrer"><strong>${esc(row.title)}</strong></a>
+                            </div>
+                            ${doneBanner}
+                        </td>
+                        <td>${slugHtml}</td>
+                        <td>${langDetectHtml}</td>
+                        ${matrixCells}
+                        <td style="text-align:center;">
+                            <button type="button" class="button button-small button-primary plu-bulk-single-run-btn" data-post-id="${postId}">
+                                &#9889; Обработать
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            };
+
+            const updateSelectedCounter = function() {
+                const totalRows = $tbody.find('.plu-bulk-row-cb').length;
+                const checkedCount = $tbody.find('.plu-bulk-row-cb:checked').length;
+                const sessionLimit = parseInt($('#plu-bulk-session-limit').val(), 10) || 0;
+                const effectiveRun = (sessionLimit > 0 && checkedCount > sessionLimit) ? sessionLimit : checkedCount;
+
+                if (totalRows === 0) {
+                    $summaryCounter.text('');
+                    $startBtn.prop('disabled', true);
+                    return;
+                }
+
+                $summaryCounter.html(
+                    `Отмечено статей: <strong>${checkedCount}</strong> из ${totalRows}` +
+                    (sessionLimit > 0 && checkedCount > sessionLimit ? ` (за этот запуск будет обработано: <strong>${effectiveRun}</strong> по лимиту сессии)` : '')
+                );
+                $startBtn.prop('disabled', checkedCount === 0 || isBulkRunning);
+            };
+
+            // Сканирование статей
+            const runScan = function() {
+                const sourceFilter = String($('#plu-bulk-source-filter').val() || 'all_posts');
+                const year = parseInt($('#plu-bulk-year-filter').val(), 10) || 0;
+                const problemFilter = String($('#plu-bulk-problem-filter').val() || 'needs_action');
+
+                $scanBtn.prop('disabled', true);
+                $scanSpinner.addClass('is-active');
+
+                $.ajax({
+                    url: pluAdminData.ajax_url,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: {
+                        action: 'plu_bulk_scan_category',
+                        nonce: pluAdminData.nonce,
+                        source_filter: sourceFilter,
+                        year: year,
+                        problem_filter: problemFilter
+                    },
+                    success: function(response) {
+                        if (response.success && response.data) {
+                            const d = response.data;
+                            renderCategoryStatusBar(d.category_info || null);
+
+                            if (d.counts) {
+                                $scanStats.html(
+                                    `Всего групп в выборке: <strong>${esc(d.counts.total_scanned)}</strong> | ` +
+                                    `Требуют действий: <strong>${esc(d.counts.needs_action)}</strong> | ` +
+                                    `Пересортица: <strong>${esc(d.counts.mismatch_only)}</strong> | ` +
+                                    `Полностью готовы: <strong>${esc(d.counts.complete)}</strong>`
+                                );
+                            }
+
+                            const rows = Array.isArray(d.rows) ? d.rows : [];
+                            if (rows.length === 0) {
+                                const colSpan = 5 + activeLangs.length;
+                                $tbody.html(`
+                                    <tr>
+                                        <td colspan="${colSpan}" style="text-align:center; padding:24px; color:#1a7a28;">
+                                            <strong>&#9989; По выбранным фильтрам статей, требующих внимания, не найдено!</strong>
+                                        </td>
+                                    </tr>
+                                `);
+                                $selectAllCb.prop('checked', false);
+                            } else {
+                                const htmlRows = rows.map(r => renderAuditRowHtml(r, '')).join('');
+                                $tbody.html(htmlRows);
+                                const allChecked = $tbody.find('.plu-bulk-row-cb:not(:checked)').length === 0;
+                                $selectAllCb.prop('checked', allChecked);
+                            }
+                            updateSelectedCounter();
+                        } else {
+                            const msg = (response.data && response.data.message) ? response.data.message : 'Ошибка сканирования.';
+                            alert(msg);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        alert(`Сетевая ошибка сканирования: ${error || status} (HTTP ${xhr.status || 500})`);
+                    },
+                    complete: function() {
+                        $scanBtn.prop('disabled', false);
+                        $scanSpinner.removeClass('is-active');
+                    }
+                });
+            };
+
+            $scanBtn.on('click', function(e) {
+                e.preventDefault();
+                runScan();
+            });
+
+            // Создание и связывание недостающих рубрик в 1 клик
+            $catStatusBar.on('click', '.plu-bulk-fix-cat-btn', function(e) {
+                e.preventDefault();
+                const $btn = $(this);
+                const catId = parseInt($btn.attr('data-cat-id'), 10) || 0;
+                if (!catId) {
+                    return;
+                }
+
+                $btn.prop('disabled', true).text('⏳ Создание и перевод рубрик...');
+
+                $.ajax({
+                    url: pluAdminData.ajax_url,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: {
+                        action: 'plu_bulk_fix_category_terms',
+                        nonce: pluAdminData.nonce,
+                        cat_id: catId
+                    },
+                    success: function(response) {
+                        if (response.success && response.data) {
+                            renderCategoryStatusBar(response.data.category_info || null);
+                        } else {
+                            const msg = (response.data && response.data.message) ? response.data.message : 'Ошибка создания рубрик.';
+                            alert(msg);
+                            $btn.prop('disabled', false).text('➕ Создать/связать недостающие языковые рубрики в 1 клик');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        alert(`Сетевая ошибка: ${error || status}`);
+                        $btn.prop('disabled', false);
+                    }
+                });
+            });
+
+            // Чекбокс «Выбрать все»
+            $selectAllCb.on('change', function() {
+                const isChecked = $(this).is(':checked');
+                $tbody.find('.plu-bulk-row-cb').prop('checked', isChecked);
+                updateSelectedCounter();
+            });
+
+            $tbody.on('change', '.plu-bulk-row-cb', updateSelectedCounter);
+            $('#plu-bulk-session-limit').on('change', updateSelectedCounter);
+
+            // Сбор текущих настроек пакетной обработки
+            const collectBulkSettings = function() {
+                const targetLangs = [];
+                $bulkBox.find('.plu-bulk-target-lang-cb:checked').each(function() {
+                    targetLangs.push(String($(this).val()));
+                });
+
+                return {
+                    sessionLimit: parseInt($('#plu-bulk-session-limit').val(), 10) || 0,
+                    delaySec: parseInt($('#plu-bulk-delay-sec').val(), 10) || 0,
+                    engine: String($('#plu-bulk-engine').val() || 'gtx'),
+                    overwritePolicy: String($('#plu-bulk-overwrite-policy').val() || 'smart'),
+                    datePolicy: String($('#plu-bulk-date-policy').val() || 'preserve'),
+                    targetLangs: targetLangs,
+                    fixMismatch: $('#plu-bulk-fix-mismatch').is(':checked') ? 1 : 0,
+                    cleanSlugs: $('#plu-bulk-clean-slugs').is(':checked') ? 1 : 0
+                };
+            };
+
+            // Последовательная очередь обработки постов
+            const runBulkQueue = function(postIds, index, cfg) {
+                if (stopRequested || index >= postIds.length) {
+                    isBulkRunning = false;
+                    $stopBtn.hide();
+                    $startBtn.prop('disabled', false);
+                    $tbody.find('.plu-bulk-single-run-btn').prop('disabled', false);
+                    updateSelectedCounter();
+
+                    const finishMsg = stopRequested
+                        ? `&#9208; Пакетная обработка остановлена пользователем (обработано ${index} из ${postIds.length}).`
+                        : `&#127881; Пакетная сессия успешно завершена! Обработано статей: ${postIds.length}.`;
+                    $progressLabel.html(finishMsg);
+                    $processLog.prepend(`<div class="plu-log-item is-success"><strong>${finishMsg}</strong></div>`);
+                    return;
+                }
+
+                const postId = postIds[index];
+                const stepNum = index + 1;
+                const totalNum = postIds.length;
+                const pct = Math.round(((stepNum - 1) / totalNum) * 100);
+
+                $progressPercent.text(pct + '%');
+                $progressBar.css('width', pct + '%');
+                $progressLabel.html(`&#9203; Обработка статьи #${esc(postId)} (${stepNum} из ${totalNum})...`);
+
+                const $row = $(`#plu-bulk-row-${postId}`);
+                $row.addClass('is-processing');
+                $row.find('.plu-bulk-single-run-btn').prop('disabled', true).text('⏳ В работе...');
+
+                $.ajax({
+                    url: pluAdminData.ajax_url,
+                    type: 'POST',
+                    dataType: 'json',
+                    data: {
+                        action: 'plu_bulk_process_post',
+                        nonce: pluAdminData.nonce,
+                        post_id: postId,
+                        engine: cfg.engine,
+                        overwrite_policy: cfg.overwritePolicy,
+                        date_policy: cfg.datePolicy,
+                        target_langs: cfg.targetLangs,
+                        fix_language_mismatch: cfg.fixMismatch,
+                        clean_same_slugs: cfg.cleanSlugs
+                    },
+                    success: function(response) {
+                        if (response.success && response.data) {
+                            const d = response.data;
+                            const summaryText = d.summary || 'Готово';
+
+                            if (d.row && d.row.post_id) {
+                                const newRowHtml = renderAuditRowHtml(d.row, summaryText);
+                                $row.replaceWith(newRowHtml);
+                            } else {
+                                $row.removeClass('is-processing is-mismatch').addClass('is-complete');
+                                $row.find('.plu-bulk-row-cb').prop('checked', false);
+                                $row.find('.plu-bulk-single-run-btn').prop('disabled', false).text('✓ Готово');
+                            }
+
+                            $processLog.prepend(
+                                `<div class="plu-log-item is-success">` +
+                                `<strong>&#9989; Статья #${esc(postId)} (${esc(d.date)}, slug: <code>${esc(d.clean_slug)}</code>):</strong> ${esc(summaryText)}` +
+                                `</div>`
+                            );
+                        } else {
+                            const errMsg = (response.data && response.data.message) ? response.data.message : 'Ошибка обработки статьи.';
+                            $row.removeClass('is-processing').addClass('is-error');
+                            $row.find('.plu-bulk-single-run-btn').prop('disabled', false).text('⚡ Повторить');
+                            $processLog.prepend(
+                                `<div class="plu-log-item is-error"><strong>&#10060; Статья #${esc(postId)}:</strong> ${esc(errMsg)}</div>`
+                            );
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        $row.removeClass('is-processing').addClass('is-error');
+                        $row.find('.plu-bulk-single-run-btn').prop('disabled', false).text('⚡ Повторить');
+                        $processLog.prepend(
+                            `<div class="plu-log-item is-error"><strong>&#10060; Статья #${esc(postId)}:</strong> Сетевая ошибка (${esc(error || status)}, HTTP ${esc(xhr.status || 500)})</div>`
+                        );
+                    },
+                    complete: function() {
+                        const donePct = Math.round((stepNum / totalNum) * 100);
+                        $progressPercent.text(donePct + '%');
+                        $progressBar.css('width', donePct + '%');
+
+                        if (stopRequested || stepNum >= totalNum) {
+                            runBulkQueue(postIds, index + 1, cfg);
+                            return;
+                        }
+
+                        if (cfg.delaySec > 0) {
+                            $progressLabel.html(`&#9201; Пауза ${esc(cfg.delaySec)} сек перед следующей статьей (${stepNum} из ${totalNum} готово)...`);
+                            pauseTimer = setTimeout(function() {
+                                runBulkQueue(postIds, index + 1, cfg);
+                            }, cfg.delaySec * 1000);
+                        } else {
+                            runBulkQueue(postIds, index + 1, cfg);
+                        }
+                    }
+                });
+            };
+
+            // Запуск пакетной обработки отмеченных строк
+            $startBtn.on('click', function(e) {
+                e.preventDefault();
+                if (isBulkRunning) {
+                    return;
+                }
+
+                const cfg = collectBulkSettings();
+                if (cfg.targetLangs.length === 0) {
+                    alert('Выберите хотя бы один целевой язык.');
+                    return;
+                }
+
+                let selectedIds = [];
+                $tbody.find('.plu-bulk-row-cb:checked').each(function() {
+                    const pid = parseInt($(this).val(), 10);
+                    if (pid > 0) {
+                        selectedIds.push(pid);
+                    }
+                });
+
+                if (selectedIds.length === 0) {
+                    alert('Отметьте хотя бы одну статью в таблице.');
+                    return;
+                }
+
+                if (cfg.sessionLimit > 0 && selectedIds.length > cfg.sessionLimit) {
+                    selectedIds = selectedIds.slice(0, cfg.sessionLimit);
+                }
+
+                isBulkRunning = true;
+                stopRequested = false;
+                $startBtn.prop('disabled', true);
+                $stopBtn.show();
+                $progressWrap.show();
+                $processLog.empty().show();
+
+                runBulkQueue(selectedIds, 0, cfg);
+            });
+
+            // Остановка пакетной очереди
+            $stopBtn.on('click', function(e) {
+                e.preventDefault();
+                stopRequested = true;
+                if (pauseTimer) {
+                    clearTimeout(pauseTimer);
+                    pauseTimer = null;
+                }
+                $progressLabel.html('&#9208; Остановка после завершения текущего запроса...');
+            });
+
+            // Быстрая кнопка обработки одной строки прямо из таблицы
+            $tbody.on('click', '.plu-bulk-single-run-btn', function(e) {
+                e.preventDefault();
+                if (isBulkRunning) {
+                    return;
+                }
+                const postId = parseInt($(this).attr('data-post-id'), 10) || 0;
+                if (!postId) {
+                    return;
+                }
+
+                const cfg = collectBulkSettings();
+                if (cfg.targetLangs.length === 0) {
+                    alert('Выберите хотя бы один целевой язык.');
+                    return;
+                }
+
+                isBulkRunning = true;
+                stopRequested = false;
+                $startBtn.prop('disabled', true);
+                $stopBtn.show();
+                $progressWrap.show();
+                $processLog.show();
+
+                runBulkQueue([postId], 0, cfg);
             });
         }
 

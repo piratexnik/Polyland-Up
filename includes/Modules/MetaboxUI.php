@@ -90,26 +90,13 @@ final class MetaboxUI {
         $default_translator = (string) plu_get_option( 'default_translator', 'gtx' );
         $default_mode       = 'gemini' === $default_translator ? 'translate_gemini' : 'translate_gtx';
         $enable_same_slug   = (bool) plu_get_option( 'enable_same_slug', 1 );
-        $post_slug          = '' !== $post->post_name ? $post->post_name : sanitize_title( $post->post_title );
-
-        // Язык по умолчанию для селекта фактического языка текста (если текущая запись uk -> выбираем ru)
-        $default_actual_lang = '';
-        foreach ( $target_languages as $tl ) {
-            if ( 'uk' === $source_lang && 'ru' === (string) $tl->slug ) {
-                $default_actual_lang = 'ru';
-                break;
-            }
-        }
-        if ( '' === $default_actual_lang && ! empty( $target_languages ) ) {
-            $default_actual_lang = (string) $target_languages[0]->slug;
-        }
+        $raw_slug           = '' !== $post->post_name ? $post->post_name : sanitize_title( $post->post_title );
+        $post_slug          = SameSlug::normalize_clean_slug( $raw_slug );
         ?>
         <div
             class="plu-metabox-wrap"
             id="plu-duplicator-box"
             data-post-id="<?php echo esc_attr( (string) $post->ID ); ?>"
-            data-assigned-lang="<?php echo esc_attr( $source_lang ); ?>"
-            data-default-mode="<?php echo esc_attr( $default_mode ); ?>"
         >
             <div class="plu-source-lang-banner">
                 <strong><?php esc_html_e( 'Исходный язык:', 'polyland-up' ); ?></strong>
@@ -123,30 +110,6 @@ final class MetaboxUI {
                     <?php esc_html_e( 'В Polylang пока не добавлены другие языки для перевода.', 'polyland-up' ); ?>
                 </p>
             <?php else : ?>
-                <div class="plu-metabox-section plu-swap-lang-box">
-                    <label class="plu-option-checkbox" for="plu-swap-actual-lang">
-                        <input type="checkbox" id="plu-swap-actual-lang" name="swap_actual_lang" value="1" />
-                        <span><strong><?php esc_html_e( '🔄 Текст внутри записи фактически на другом языке (перенести оригинал и перевести текущую запись)', 'polyland-up' ); ?></strong></span>
-                    </label>
-
-                    <div id="plu-swap-actual-lang-body" class="plu-swap-actual-lang-body" style="display:none;">
-                        <label for="plu_actual_content_lang" class="plu-section-label" style="margin-top:8px;">
-                            <?php esc_html_e( 'Фактический язык текста сейчас:', 'polyland-up' ); ?>
-                        </label>
-                        <select id="plu_actual_content_lang" name="actual_content_lang" class="widefat">
-                            <?php foreach ( $target_languages as $tl ) : ?>
-                                <?php
-                                $tl_slug = (string) $tl->slug;
-                                $tl_name = (string) ( $tl->name ?? $tl_slug );
-                                ?>
-                                <option value="<?php echo esc_attr( $tl_slug ); ?>" <?php selected( $default_actual_lang, $tl_slug ); ?>>
-                                    <?php echo esc_html( $tl_name . ' (' . strtoupper( $tl_slug ) . ')' ); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                        <p class="description plu-swap-hint" id="plu-swap-hint"></p>
-                    </div>
-                </div>
                 <div class="plu-metabox-section">
                     <div class="plu-section-label"><?php esc_html_e( 'Целевые языки:', 'polyland-up' ); ?></div>
                     <div class="plu-target-langs-list">
@@ -324,33 +287,15 @@ final class MetaboxUI {
             $target_status = 'draft';
         }
 
-        $swap_actual_lang    = ! empty( $_POST['swap_actual_lang'] );
-        $actual_content_lang = isset( $_POST['actual_content_lang'] ) ? sanitize_key( wp_unslash( (string) $_POST['actual_content_lang'] ) ) : '';
-        $self_translate      = ! empty( $_POST['self_translate'] );
-
         $options = [
-            'mode'                => $mode,
-            'keep_same_slug'      => ! empty( $_POST['keep_same_slug'] ),
-            'rewrite_links'       => ! empty( $_POST['rewrite_links'] ),
-            'target_status'       => $target_status,
-            'overwrite_existing'  => ! empty( $_POST['overwrite_existing'] ),
-            'swap_actual_lang'    => $swap_actual_lang,
-            'actual_content_lang' => $actual_content_lang,
+            'mode'               => $mode,
+            'keep_same_slug'     => ! empty( $_POST['keep_same_slug'] ),
+            'rewrite_links'      => ! empty( $_POST['rewrite_links'] ),
+            'target_status'      => $target_status,
+            'overwrite_existing' => ! empty( $_POST['overwrite_existing'] ),
         ];
 
         try {
-            // Специальный шаг: перевод самой текущей открытой записи (с фактического языка текста на её язык в Polylang)
-            if ( $self_translate && $swap_actual_lang && '' !== $actual_content_lang ) {
-                $result = self::self_translate_source_post( $source_post, $actual_content_lang, $options );
-                if ( is_wp_error( $result ) ) {
-                    wp_send_json_error( [
-                        'message' => $result->get_error_message(),
-                        'lang'    => (string) ( function_exists( 'pll_get_post_language' ) ? pll_get_post_language( $source_post->ID, 'slug' ) : '' ),
-                    ] );
-                }
-                wp_send_json_success( $result );
-            }
-
             // Поддержка как одиночного target_lang (пошаговый AJAX из JS), так и массива target_langs
             $single_lang = isset( $_POST['target_lang'] ) ? sanitize_key( wp_unslash( (string) $_POST['target_lang'] ) ) : '';
             if ( '' !== $single_lang ) {
@@ -373,19 +318,9 @@ final class MetaboxUI {
                 ] );
             }
 
-            // При swap_actual_lang фиксируем исходный пост в памяти и сначала переносим оригинал в actual_content_lang
-            $frozen_source = clone $source_post;
-            if ( $swap_actual_lang && '' !== $actual_content_lang && in_array( $actual_content_lang, $target_langs, true ) ) {
-                $target_langs = array_values(
-                    array_unique(
-                        array_merge( [ $actual_content_lang ], $target_langs )
-                    )
-                );
-            }
-
             $results = [];
             foreach ( $target_langs as $lang_slug ) {
-                $res = self::duplicate_post_to_language( $frozen_source, $lang_slug, $options );
+                $res = self::duplicate_post_to_language( $source_post, $lang_slug, $options );
                 if ( is_wp_error( $res ) ) {
                     $results[] = [
                         'success' => false,
@@ -397,24 +332,8 @@ final class MetaboxUI {
                 }
             }
 
-            $self_updated = false;
-            if ( $swap_actual_lang && '' !== $actual_content_lang ) {
-                $self_res = self::self_translate_source_post( $frozen_source, $actual_content_lang, $options );
-                if ( is_wp_error( $self_res ) ) {
-                    $results[] = [
-                        'success' => false,
-                        'lang'    => (string) ( function_exists( 'pll_get_post_language' ) ? pll_get_post_language( $frozen_source->ID, 'slug' ) : '' ),
-                        'message' => $self_res->get_error_message(),
-                    ];
-                } else {
-                    $self_updated = ! empty( $self_res['self_updated'] );
-                    $results[]    = array_merge( [ 'success' => true ], $self_res );
-                }
-            }
-
             wp_send_json_success( [
-                'results'      => $results,
-                'self_updated' => $self_updated,
+                'results' => $results,
             ] );
         } catch ( \Throwable $e ) {
             wp_send_json_error( [
@@ -446,17 +365,25 @@ final class MetaboxUI {
             return new \WP_Error( 'plu_invalid_lang', sprintf( __( 'Недопустимый код языка: %s.', 'polyland-up' ), $target_lang ) );
         }
 
-        $source_lang = function_exists( 'pll_get_post_language' ) ? (string) pll_get_post_language( $source_post->ID, 'slug' ) : '';
+        $source_lang = ! empty( $options['source_lang_override'] )
+            ? (string) $options['source_lang_override']
+            : ( function_exists( 'pll_get_post_language' ) ? (string) pll_get_post_language( $source_post->ID, 'slug' ) : '' );
         if ( '' === $source_lang ) {
             return new \WP_Error( 'plu_no_source_lang', __( 'У исходной записи не указан язык Polylang.', 'polyland-up' ) );
         }
 
-        if ( $target_lang === $source_lang ) {
+        $assigned_source_lang = function_exists( 'pll_get_post_language' ) ? (string) pll_get_post_language( $source_post->ID, 'slug' ) : $source_lang;
+        if ( $target_lang === $assigned_source_lang && empty( $options['allow_same_assigned_lang'] ) ) {
             return new \WP_Error( 'plu_same_lang', __( 'Целевой язык совпадает с исходным языком записи.', 'polyland-up' ) );
         }
 
         // 1. Проверка существующего перевода
-        $existing_id        = function_exists( 'pll_get_post' ) ? (int) pll_get_post( $source_post->ID, $target_lang ) : 0;
+        $existing_id = isset( $options['existing_post_id'] )
+            ? (int) $options['existing_post_id']
+            : ( function_exists( 'pll_get_post' ) ? (int) pll_get_post( $source_post->ID, $target_lang ) : 0 );
+        if ( $existing_id === (int) $source_post->ID ) {
+            $existing_id = 0;
+        }
         $overwrite_existing = ! empty( $options['overwrite_existing'] );
 
         if ( $existing_id > 0 && ! $overwrite_existing ) {
@@ -498,24 +425,7 @@ final class MetaboxUI {
         $translation_summary   = '';
         $mode                  = (string) ( $options['mode'] ?? 'clone_only' );
         $notes                 = [];
-        $swap_actual_lang      = ! empty( $options['swap_actual_lang'] );
-        $actual_content_lang   = (string) ( $options['actual_content_lang'] ?? '' );
         $effective_source_lang = $source_lang;
-
-        // Режим swap_actual_lang:
-        // - для языка actual_content_lang переносим оригинал без перевода (clone_only);
-        // - для остальных языков переводим с actual_content_lang.
-        if ( $swap_actual_lang && '' !== $actual_content_lang ) {
-            if ( $target_lang === $actual_content_lang ) {
-                $mode                = 'clone_only';
-                $translation_summary = sprintf(
-                    __( 'Оригинал текста перенесён без перевода (%s)', 'polyland-up' ),
-                    strtoupper( $actual_content_lang )
-                );
-            } else {
-                $effective_source_lang = $actual_content_lang;
-            }
-        }
 
         $is_translation_mode = in_array( $mode, [ 'translate_gtx', 'translate_gemini' ], true );
         if ( $is_translation_mode ) {
@@ -583,9 +493,13 @@ final class MetaboxUI {
             }
 
             // КРИТИЧНО для Divi 5: оборачиваем контент в wp_slash(), чтобы wp_insert_post не уничтожил экранирование \" в JSON блоков!
-            $post_date_gmt = ( ! empty( $source_post->post_date_gmt ) && '0000-00-00 00:00:00' !== $source_post->post_date_gmt )
-                ? $source_post->post_date_gmt
-                : get_gmt_from_date( $source_post->post_date );
+            $preserve_date = ! isset( $options['preserve_date'] ) || ! empty( $options['preserve_date'] );
+            $post_date     = $preserve_date ? $source_post->post_date : current_time( 'mysql' );
+            $post_date_gmt = $preserve_date
+                ? ( ( ! empty( $source_post->post_date_gmt ) && '0000-00-00 00:00:00' !== $source_post->post_date_gmt )
+                    ? $source_post->post_date_gmt
+                    : get_gmt_from_date( $source_post->post_date ) )
+                : current_time( 'mysql', true );
 
             $post_data = [
                 'post_type'     => $source_post->post_type,
@@ -596,13 +510,15 @@ final class MetaboxUI {
                 'post_parent'   => $target_parent,
                 'menu_order'    => (int) $source_post->menu_order,
                 'post_author'   => get_current_user_id() ?: (int) $source_post->post_author,
-                'post_date'     => $source_post->post_date,
+                'post_date'     => $post_date,
                 'post_date_gmt' => $post_date_gmt,
                 'edit_date'     => true,
             ];
 
-            if ( ! empty( $options['keep_same_slug'] ) && '' !== $source_post->post_name ) {
-                $post_data['post_name'] = $source_post->post_name;
+            if ( ! empty( $options['custom_slug'] ) && is_string( $options['custom_slug'] ) ) {
+                $post_data['post_name'] = $options['custom_slug'];
+            } elseif ( ! empty( $options['keep_same_slug'] ) && '' !== $source_post->post_name ) {
+                $post_data['post_name'] = SameSlug::normalize_clean_slug( $source_post->post_name );
             }
 
             /**
@@ -630,10 +546,20 @@ final class MetaboxUI {
 
             // 5. Привязка языка и группы переводов Polylang
             pll_set_post_language( $new_post_id, $target_lang );
+            if ( '' !== $assigned_source_lang && $assigned_source_lang !== $target_lang ) {
+                pll_set_post_language( $source_post->ID, $assigned_source_lang );
+            }
 
             if ( function_exists( 'pll_get_post_translations' ) && function_exists( 'pll_save_post_translations' ) ) {
-                $translations                 = (array) pll_get_post_translations( $source_post->ID );
-                $translations[ $source_lang ] = $source_post->ID;
+                $translations = (array) pll_get_post_translations( $source_post->ID );
+                foreach ( $translations as $k_lang => $k_pid ) {
+                    if ( (int) $k_pid === $new_post_id || ( (int) $k_pid === (int) $source_post->ID && $k_lang !== $assigned_source_lang ) ) {
+                        unset( $translations[ $k_lang ] );
+                    }
+                }
+                if ( '' !== $assigned_source_lang && $assigned_source_lang !== $target_lang ) {
+                    $translations[ $assigned_source_lang ] = $source_post->ID;
+                }
                 $translations[ $target_lang ] = $new_post_id;
                 pll_save_post_translations( $translations );
             }
@@ -705,7 +631,9 @@ final class MetaboxUI {
             return new \WP_Error( 'plu_invalid_lang', sprintf( __( 'Недопустимый код языка: %s.', 'polyland-up' ), $actual_content_lang ) );
         }
 
-        $assigned_lang = (string) pll_get_post_language( $source_post->ID, 'slug' );
+        $assigned_lang = ! empty( $options['assigned_lang_override'] )
+            ? (string) $options['assigned_lang_override']
+            : (string) pll_get_post_language( $source_post->ID, 'slug' );
         if ( '' === $assigned_lang ) {
             return new \WP_Error( 'plu_no_source_lang', __( 'У исходной записи не указан язык Polylang.', 'polyland-up' ) );
         }
@@ -767,17 +695,28 @@ final class MetaboxUI {
 
             SameSlug::$forced_lang = $assigned_lang;
             try {
-                $post_date_gmt = ( ! empty( $source_post->post_date_gmt ) && '0000-00-00 00:00:00' !== $source_post->post_date_gmt )
-                    ? $source_post->post_date_gmt
-                    : get_gmt_from_date( $source_post->post_date );
+                $preserve_date = ! isset( $options['preserve_date'] ) || ! empty( $options['preserve_date'] );
+                $post_date     = $preserve_date ? $source_post->post_date : current_time( 'mysql' );
+                $post_date_gmt = $preserve_date
+                    ? ( ( ! empty( $source_post->post_date_gmt ) && '0000-00-00 00:00:00' !== $source_post->post_date_gmt )
+                        ? $source_post->post_date_gmt
+                        : get_gmt_from_date( $source_post->post_date ) )
+                    : current_time( 'mysql', true );
+
+                $target_slug = $source_post->post_name;
+                if ( ! empty( $options['custom_slug'] ) && is_string( $options['custom_slug'] ) ) {
+                    $target_slug = $options['custom_slug'];
+                } elseif ( ! empty( $options['keep_same_slug'] ) && '' !== $source_post->post_name ) {
+                    $target_slug = SameSlug::normalize_clean_slug( $source_post->post_name );
+                }
 
                 $update_data = [
                     'ID'            => $source_post->ID,
                     'post_title'    => wp_slash( $post_title ),
                     'post_excerpt'  => wp_slash( $post_excerpt ),
                     'post_content'  => wp_slash( $post_content ),
-                    'post_name'     => $source_post->post_name,
-                    'post_date'     => $source_post->post_date,
+                    'post_name'     => $target_slug,
+                    'post_date'     => $post_date,
                     'post_date_gmt' => $post_date_gmt,
                     'edit_date'     => true,
                     'post_status'   => $source_post->post_status,

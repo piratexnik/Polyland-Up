@@ -972,10 +972,11 @@ final class Settings {
 
         $active_tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( (string) $_GET['tab'] ) ) : 'general';
         $tabs = [
-            'general'    => __( 'Основные', 'polyland-up' ),
-            'menus'      => __( '🍔 Дубликатор Меню', 'polyland-up' ),
-            'strings'    => __( '🔤 Строки шаблонов (UI)', 'polyland-up' ),
-            'pagination' => __( '🔢 Пагинация и Loop', 'polyland-up' ),
+            'general'      => __( 'Основные', 'polyland-up' ),
+            'menus'        => __( '🍔 Дубликатор Меню', 'polyland-up' ),
+            'strings'      => __( '🔤 Строки шаблонов (UI)', 'polyland-up' ),
+            'pagination'   => __( '🔢 Пагинация и Loop', 'polyland-up' ),
+            'bulk_archive' => __( '🗂 Пакетный перевод архива', 'polyland-up' ),
         ];
         if ( ! array_key_exists( $active_tab, $tabs ) ) {
             $active_tab = 'general';
@@ -1057,6 +1058,8 @@ final class Settings {
                     <?php \PolylangUp\Modules\StringsManager::render_tab_content(); ?>
                 <?php elseif ( 'pagination' === $active_tab ) : ?>
                     <?php \PolylangUp\Modules\LoopPagination::render_tab_content(); ?>
+                <?php elseif ( 'bulk_archive' === $active_tab ) : ?>
+                    <?php \PolylangUp\Modules\BulkArchiveTranslator::render_tab_content(); ?>
                 <?php endif; ?>
             </div>
         </div>

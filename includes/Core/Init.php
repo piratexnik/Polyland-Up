@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace PolylangUp\Core;
 
+use PolylangUp\Modules\BulkArchiveTranslator;
 use PolylangUp\Modules\LoopPagination;
 use PolylangUp\Modules\MenuDuplicator;
 use PolylangUp\Modules\MetaboxUI;
@@ -31,6 +32,7 @@ final class Init {
 			Updater::init();
 			MetaboxUI::init();
 			MenuDuplicator::init();
+			BulkArchiveTranslator::init();
 		}
 
 		// Модули одинаковых слагов, UI-строк и пагинации Loop работают как в админке, так и на фронтенде
