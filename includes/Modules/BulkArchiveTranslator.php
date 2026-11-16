@@ -108,10 +108,11 @@ final class BulkArchiveTranslator {
 			$ru_unique_chars = (int) preg_match_all( '/[ыэъёЫЭЪЁ]/u', $clean_no_brands );
 
 			$uk_words = (int) preg_match_all( '/(?<![\p{L}])(ми|на\s+виставці|виставці|у\s+місті|місті|підсумки|новинки|семінар|виставка|та|що|для|від|про|року|рік|або|якщо|буде|вони|його|неї|між|під|після|зараз|також|лише|більше|шановні|повідомляємо|працює|відкриття|наших|клієнтів)(?![\p{L}])/iu', $clean_no_brands );
-			$ru_words = (int) preg_match_all( '/(?<![\p{L}])(мы|на\s+выставке|выставке|выставка|итоги|городе|семинар|или|что|был|была|были|году|год|также|только|если|будет|они|его|между|после|сейчас|более|котор[а-яё]*|этом|этого|наша|компания|лучшие|направления)(?![\p{L}])/iu', $clean_no_brands );
+			$ru_words = (int) preg_match_all( '/(?<![\p{L}])(мы|на\s+выставке|выставке|выставка|итоги|городе|семинар|или|что|был|была|были|году|год|также|только|если|будет|они|его|между|после|сейчас|более|котор[а-яё]*|этом|этого|наша|компания|лучшие|направления|поздравляем|приглашаем|сети|бизнес|строительство|реконструкция|производитель|рынка)(?![\p{L}])/iu', $clean_no_brands );
+			$ru_conj  = (int) preg_match_all( '/(?<=^|\s)[ис](?=\s|$)/ui', $clean_no_brands );
 
 			$uk_score = ( $uk_unique_chars * 4 ) + ( $uk_words * 3 );
-			$ru_score = ( $ru_unique_chars * 4 ) + ( $ru_words * 3 );
+			$ru_score = ( $ru_unique_chars * 4 ) + ( ( $ru_words + $ru_conj ) * 3 );
 
 			if ( $uk_score > $ru_score ) {
 				return 'uk';
@@ -758,12 +759,14 @@ final class BulkArchiveTranslator {
 	/**
 	 * Ищет в БД несвязанные посты-однофамильцы других языков с тем же базовым чистым слагом.
 	 *
-	 * @param string             $clean_slug Нормализованный базовый слаг (например, 'article-2019-04-17-2').
-	 * @param string             $post_type  Тип записи.
-	 * @param array<int, string> $lang_slugs Список активных кодов языков.
+	 * @param string             $clean_slug     Нормализованный базовый слаг (например, 'article-2019-04-17-2').
+	 * @param string             $post_type      Тип записи.
+	 * @param array<int, string> $lang_slugs     Список активных кодов языков.
+	 * @param int                $source_post_id ID исходной записи, для которой ищутся осиротевшие однофамильцы.
+	 * @param string             $source_lang    Код исходного языка записи.
 	 * @return array<string, int> Карта lang_slug => post_id.
 	 */
-	public static function find_slug_siblings_by_clean_slug( string $clean_slug, string $post_type, array $lang_slugs ): array {
+	public static function find_slug_siblings_by_clean_slug( string $clean_slug, string $post_type, array $lang_slugs, int $source_post_id = 0, string $source_lang = '' ): array {
 		global $wpdb;
 
 		if ( '' === $clean_slug ) {
@@ -802,10 +805,23 @@ final class BulkArchiveTranslator {
 			if ( SameSlug::normalize_clean_slug( $pname ) !== $clean_slug ) {
 				continue;
 			}
-			$plang = function_exists( 'pll_get_post_language' ) ? (string) pll_get_post_language( $pid, 'slug' ) : '';
-			if ( '' !== $plang && in_array( $plang, $lang_slugs, true ) && empty( $siblings[ $plang ] ) ) {
-				$siblings[ $plang ] = $pid;
+			if ( $source_post_id > 0 && $pid === $source_post_id ) {
+				continue;
 			}
+			$plang = function_exists( 'pll_get_post_language' ) ? (string) pll_get_post_language( $pid, 'slug' ) : '';
+			if ( '' === $plang || ! in_array( $plang, $lang_slugs, true ) || ! empty( $siblings[ $plang ] ) ) {
+				continue;
+			}
+
+			// КРИТИЧНО: Проверяем, не принадлежит ли кандидат уже другой статье в Polylang
+			if ( $source_post_id > 0 && function_exists( 'pll_get_post_translations' ) ) {
+				$cand_translations = (array) pll_get_post_translations( $pid );
+				if ( '' !== $source_lang && ! empty( $cand_translations[ $source_lang ] ) && (int) $cand_translations[ $source_lang ] !== $source_post_id ) {
+					continue;
+				}
+			}
+
+			$siblings[ $plang ] = $pid;
 		}
 
 		return $siblings;
@@ -833,13 +849,19 @@ final class BulkArchiveTranslator {
 			$pll_translations[ $assigned_lang ] = $post->ID;
 		}
 
-		// Проверяем, есть ли несвязанные однофамильцы по базовому чистому слагу
-		$slug_siblings    = self::find_slug_siblings_by_clean_slug( $clean_slug, $post->post_type, $lang_slugs );
+		// Проверяем, есть ли несвязанные осиротевшие однофамильцы по базовому чистому слагу
+		$slug_siblings    = self::find_slug_siblings_by_clean_slug( $clean_slug, $post->post_type, $lang_slugs, (int) $post->ID, $assigned_lang );
 		$unlinked_matches = [];
 
 		foreach ( $slug_siblings as $s_lang => $s_id ) {
-			if ( empty( $pll_translations[ $s_lang ] ) && $s_id !== $post->ID ) {
-				$unlinked_matches[ $s_lang ] = $s_id;
+			if ( empty( $pll_translations[ $s_lang ] ) && (int) $s_id !== (int) $post->ID ) {
+				if ( function_exists( 'pll_get_post_translations' ) ) {
+					$cand_translations = (array) pll_get_post_translations( (int) $s_id );
+					if ( '' !== $assigned_lang && ! empty( $cand_translations[ $assigned_lang ] ) && (int) $cand_translations[ $assigned_lang ] !== (int) $post->ID ) {
+						continue;
+					}
+				}
+				$unlinked_matches[ $s_lang ] = (int) $s_id;
 			}
 		}
 
@@ -1166,10 +1188,16 @@ final class BulkArchiveTranslator {
 		$translations = function_exists( 'pll_get_post_translations' ) ? (array) pll_get_post_translations( $entry_post->ID ) : [];
 		$translations[ $entry_assigned_lang ] = $entry_post->ID;
 
-		$siblings = self::find_slug_siblings_by_clean_slug( $clean_slug, $entry_post->post_type, $lang_slugs );
+		$siblings = self::find_slug_siblings_by_clean_slug( $clean_slug, $entry_post->post_type, $lang_slugs, (int) $entry_post->ID, $entry_assigned_lang );
 		foreach ( $siblings as $s_lang => $s_id ) {
-			if ( empty( $translations[ $s_lang ] ) ) {
-				$translations[ $s_lang ] = $s_id;
+			if ( empty( $translations[ $s_lang ] ) && (int) $s_id !== (int) $entry_post->ID ) {
+				if ( function_exists( 'pll_get_post_translations' ) ) {
+					$cand_translations = (array) pll_get_post_translations( (int) $s_id );
+					if ( '' !== $entry_assigned_lang && ! empty( $cand_translations[ $entry_assigned_lang ] ) && (int) $cand_translations[ $entry_assigned_lang ] !== (int) $entry_post->ID ) {
+						continue;
+					}
+				}
+				$translations[ $s_lang ] = (int) $s_id;
 			}
 		}
 
