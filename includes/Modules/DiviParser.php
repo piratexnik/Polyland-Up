@@ -1209,14 +1209,17 @@ final class DiviParser {
     }
 
     /**
-     * Линейный O(N) сканер для изоляции <script>, <style>, <svg> и HTML-комментариев <!-- ... -->
+     * Линейный O(N) сканер для изоляции <script>, <style>, <svg>, HTML-комментариев <!-- ... -->
+     * и блоков мигрированных фотогалерей <div class="scat-migrated-gallery"...>...</div>
      * без риска PCRE backtrack limit на больших CSS/JS-блоках.
      *
      * @param string $html Входной HTML.
      * @return array<int, array{protected: bool, text: string}>
      */
     private static function split_protected_html_blocks( string $html ): array {
-        $has_protected = false !== stripos( $html, '<script' )
+        $has_gallery   = false !== stripos( $html, 'scat-migrated-gallery' );
+        $has_protected = $has_gallery
+            || false !== stripos( $html, '<script' )
             || false !== stripos( $html, '<style' )
             || false !== stripos( $html, '<svg' )
             || false !== strpos( $html, '<!--' );
@@ -1248,6 +1251,13 @@ final class DiviParser {
                 $candidates[] = [ 'pos' => $comment_pos, 'type' => 'comment' ];
             }
 
+            if ( $has_gallery ) {
+                $gal_pos = self::find_next_migrated_gallery_pos( $html, $pos );
+                if ( false !== $gal_pos ) {
+                    $candidates[] = [ 'pos' => $gal_pos, 'type' => 'gallery' ];
+                }
+            }
+
             if ( empty( $candidates ) ) {
                 $tail = substr( $html, $pos );
                 if ( '' !== $tail ) {
@@ -1268,6 +1278,11 @@ final class DiviParser {
             if ( 'comment' === $block_type ) {
                 $end_pos = strpos( $html, '-->', $start_pos + 4 );
                 $end_len = 3;
+            } elseif ( 'gallery' === $block_type ) {
+                $block_end = self::find_closing_div_end( $html, $start_pos );
+                $result[]  = [ 'protected' => true, 'text' => substr( $html, $start_pos, $block_end - $start_pos ) ];
+                $pos       = $block_end;
+                continue;
             } else {
                 $close_tag = '</' . $block_type . '>';
                 $end_pos   = stripos( $html, $close_tag, $start_pos );
@@ -1286,6 +1301,181 @@ final class DiviParser {
         }
 
         return $result;
+    }
+
+    /**
+     * Находит позицию открывающего <div ...class="...scat-migrated-gallery..."> начиная с $offset.
+     *
+     * @param string $html   HTML-строка.
+     * @param int    $offset Начальное смещение.
+     * @return int|false
+     */
+    private static function find_next_migrated_gallery_pos( string $html, int $offset ): int|false {
+        if ( preg_match( '/<div\b[^>]*\bclass\s*=\s*(?:"[^"]*\bscat-migrated-gallery\b[^"]*"|\'[^\']*\bscat-migrated-gallery\b[^\']*\')[^>]*>/is', $html, $m, PREG_OFFSET_CAPTURE, $offset ) ) {
+            return (int) $m[0][1];
+        }
+        return false;
+    }
+
+    /**
+     * Находит байтовую позицию сразу после закрывающего </div> для блока, начинающегося с $start_pos.
+     *
+     * @param string $html      HTML-строка.
+     * @param int    $start_pos Позиция открывающего <div.
+     * @return int
+     */
+    private static function find_closing_div_end( string $html, int $start_pos ): int {
+        $len   = strlen( $html );
+        $depth = 0;
+        $pos   = $start_pos;
+
+        if ( preg_match_all( '/<\/?div\b[^>]*>/i', $html, $matches, PREG_OFFSET_CAPTURE, $start_pos ) ) {
+            foreach ( $matches[0] as $tag_info ) {
+                $tag_str = (string) $tag_info[0];
+                $tag_pos = (int) $tag_info[1];
+
+                if ( str_starts_with( strtolower( $tag_str ), '</div' ) ) {
+                    $depth--;
+                    if ( $depth <= 0 ) {
+                        return $tag_pos + strlen( $tag_str );
+                    }
+                } else {
+                    $depth++;
+                }
+            }
+        }
+
+        return $len;
+    }
+
+    /**
+     * Находит все блоки .scat-migrated-gallery в контенте и локализует их через localize_migrated_gallery().
+     *
+     * @param string $content               Полный контент записи.
+     * @param string $translated_post_title Переведённый (или текущий) заголовок записи.
+     * @param string $target_lang           Целевой язык ('uk', 'en', 'ru' и т.д.).
+     * @return string
+     */
+    public static function localize_migrated_galleries_in_content(
+        string $content,
+        string $translated_post_title,
+        string $target_lang
+    ): string {
+        if ( '' === $content || false === stripos( $content, 'scat-migrated-gallery' ) ) {
+            return $content;
+        }
+
+        $out = '';
+        $pos = 0;
+        $len = strlen( $content );
+
+        while ( $pos < $len ) {
+            $gal_start = self::find_next_migrated_gallery_pos( $content, $pos );
+            if ( false === $gal_start ) {
+                $out .= substr( $content, $pos );
+                break;
+            }
+
+            if ( $gal_start > $pos ) {
+                $out .= substr( $content, $pos, $gal_start - $pos );
+            }
+
+            $gal_end      = self::find_closing_div_end( $content, $gal_start );
+            $gallery_html = substr( $content, $gal_start, $gal_end - $gal_start );
+            $out         .= self::localize_migrated_gallery( $gallery_html, $translated_post_title, $target_lang );
+            $pos          = $gal_end;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Локализует атрибуты title и alt внутри блока .scat-migrated-gallery («{Title} — фото/photo N»)
+     * и удаляет все символы перевода строки (\r, \n), чтобы wpautop() не ломал CSS Grid тегами <br />.
+     *
+     * @param string $gallery_html          HTML блока <div class="scat-migrated-gallery">...</div>.
+     * @param string $translated_post_title Переведённый заголовок записи.
+     * @param string $target_lang           Целевой язык Polylang.
+     * @return string
+     */
+    public static function localize_migrated_gallery(
+        string $gallery_html,
+        string $translated_post_title,
+        string $target_lang
+    ): string {
+        if ( '' === $gallery_html || false === stripos( $gallery_html, 'scat-migrated-gallery' ) ) {
+            return $gallery_html;
+        }
+
+        $lang_base  = strtolower( substr( trim( $target_lang ), 0, 2 ) );
+        $photo_word = in_array( $lang_base, [ 'uk', 'ua', 'ru' ], true ) ? 'фото' : 'photo';
+        $clean_title = trim( wp_strip_all_tags( html_entity_decode( $translated_post_title, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) );
+
+        $index     = 0;
+        $in_a      = false;
+        $a_has_img = false;
+
+        $localized = (string) preg_replace_callback(
+            '/<a\b[^>]*>|<\/a>|<img\b[^>]*>/iu',
+            static function ( array $m ) use ( &$index, &$in_a, &$a_has_img, $clean_title, $photo_word ): string {
+                $tag = $m[0];
+                $low = strtolower( substr( $tag, 0, 4 ) );
+
+                if ( str_starts_with( $low, '</a' ) ) {
+                    $in_a      = false;
+                    $a_has_img = false;
+                    return $tag;
+                }
+
+                if ( str_starts_with( $low, '<a' ) ) {
+                    $index++;
+                    $in_a      = true;
+                    $a_has_img = false;
+                    $label     = '' !== $clean_title ? ( $clean_title . ' — ' . $photo_word . ' ' . $index ) : ( $photo_word . ' ' . $index );
+                    return self::set_html_tag_attribute( $tag, 'title', $label );
+                }
+
+                // <img ...>
+                if ( ! $in_a || $a_has_img ) {
+                    $index++;
+                }
+                $a_has_img = true;
+                $label     = '' !== $clean_title ? ( $clean_title . ' — ' . $photo_word . ' ' . $index ) : ( $photo_word . ' ' . $index );
+                return self::set_html_tag_attribute( $tag, 'alt', $label );
+            },
+            $gallery_html
+        );
+
+        // КРИТИЧНО для CSS Grid: убираем все \r и \n, чтобы wpautop() не вставлял <br /> между ячейками сетки
+        $localized = (string) preg_replace( '/>\s*[\r\n]+\s*</u', '><', $localized );
+        $localized = (string) preg_replace( '/[\r\n]+/u', ' ', $localized );
+
+        return trim( $localized );
+    }
+
+    /**
+     * Устанавливает или обновляет HTML-атрибут в одиночном открывающем теге с безопасным экранированием.
+     *
+     * @param string $tag       Исходный HTML-тег.
+     * @param string $attr_name Имя атрибута ('alt' или 'title').
+     * @param string $value     Новое значение атрибута.
+     * @return string
+     */
+    private static function set_html_tag_attribute( string $tag, string $attr_name, string $value ): string {
+        $escaped_val = function_exists( 'esc_attr' )
+            ? esc_attr( $value )
+            : htmlspecialchars( $value, ENT_QUOTES, 'UTF-8' );
+
+        $pattern = '/(\s+' . preg_quote( $attr_name, '/' ) . '\s*=\s*)(?:"[^"]*"|\'[^\']*\')/iu';
+        if ( 1 === preg_match( $pattern, $tag ) ) {
+            return (string) preg_replace( $pattern, '$1"' . addcslashes( $escaped_val, '\\$' ) . '"', $tag, 1 );
+        }
+
+        if ( str_ends_with( $tag, '/>' ) ) {
+            return substr( $tag, 0, -2 ) . ' ' . $attr_name . '="' . $escaped_val . '" />';
+        }
+
+        return substr( $tag, 0, -1 ) . ' ' . $attr_name . '="' . $escaped_val . '">';
     }
 
     /**

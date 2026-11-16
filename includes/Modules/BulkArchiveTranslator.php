@@ -74,10 +74,28 @@ final class BulkArchiveTranslator {
 		$letters_only = (string) preg_replace( '/[^\p{L}]+/u', '', $clean_no_brands );
 
 		// Если после вырезания брендов букв не осталось (например, «elcomUkraine 2014» + галерея),
-		// но сам заголовок/очищенный текст не пустой — это универсальное название (валидно для UK/EN/RU)
+		// но сам заголовок/очищенный текст не пустой — проверяем подписи внутри .scat-migrated-gallery
 		if ( '' === $letters_only ) {
 			$has_any_alnum = (bool) preg_match( '/[\p{L}\p{N}]/u', $clean );
-			return $has_any_alnum ? 'universal' : 'empty';
+			if ( ! $has_any_alnum ) {
+				return 'empty';
+			}
+
+			if ( false !== stripos( $content, 'scat-migrated-gallery' ) ) {
+				$gal_pos = stripos( $content, 'scat-migrated-gallery' );
+				$gal_sub = false !== $gal_pos ? substr( $content, $gal_pos, 4000 ) : '';
+				if ( '' !== $gal_sub && preg_match( '/\b(?:alt|title)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/iu', $gal_sub, $gm ) ) {
+					$first_attr = html_entity_decode( ( '' !== $gm[1] ? $gm[1] : ( $gm[2] ?? '' ) ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+					if ( preg_match( '/(?<![\p{L}])фото(?![\p{L}])|\p{Cyrillic}/iu', $first_attr ) ) {
+						return 'cyrillic_neutral';
+					}
+					if ( preg_match( '/\bphoto\b/iu', $first_attr ) ) {
+						return 'en';
+					}
+				}
+			}
+
+			return 'universal';
 		}
 
 		$cyr_count   = (int) preg_match_all( '/\p{Cyrillic}/u', $clean_no_brands );
@@ -1133,8 +1151,12 @@ final class BulkArchiveTranslator {
 
 		// Если эталонный текст нейтральный ('universal' или 'cyrillic_neutral'),
 		// в качестве конкретного языка источника берём совместимый паспортный язык
+		$title_only_lang   = self::detect_real_text_language( $entry_post->post_title, '' );
 		$is_entry_mismatch = ! self::is_lang_compatible_with_detected( $entry_assigned_lang, $true_source_lang );
-		if ( in_array( $true_source_lang, [ 'universal', 'cyrillic_neutral' ], true ) ) {
+		if ( 'universal' === $title_only_lang && false !== stripos( $entry_post->post_content, 'scat-migrated-gallery' ) ) {
+			$is_entry_mismatch = false;
+			$true_source_lang  = $entry_assigned_lang;
+		} elseif ( in_array( $true_source_lang, [ 'universal', 'cyrillic_neutral' ], true ) ) {
 			if ( ! $is_entry_mismatch ) {
 				$true_source_lang = $entry_assigned_lang;
 			} else {
@@ -1347,6 +1369,18 @@ final class BulkArchiveTranslator {
 				$update_args['post_date_gmt'] = $canonical_date_gmt;
 				$update_args['edit_date']     = true;
 				$need_post_update             = true;
+			}
+
+			if ( false !== stripos( (string) $cur_post->post_content, 'scat-migrated-gallery' ) ) {
+				$localized_gal = DiviParser::localize_migrated_galleries_in_content(
+					(string) $cur_post->post_content,
+					(string) $cur_post->post_title,
+					$l_slug
+				);
+				if ( $localized_gal !== (string) $cur_post->post_content ) {
+					$update_args['post_content'] = wp_slash( $localized_gal );
+					$need_post_update            = true;
+				}
 			}
 
 			if ( $need_post_update ) {

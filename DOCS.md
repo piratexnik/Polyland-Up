@@ -7,7 +7,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `3.5`
+- **Текущая версия:** `3.6`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -43,7 +43,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '3.4'
+- `PLU_VERSION` — '3.6'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -160,6 +160,9 @@ plu_get_option( string $key, mixed $default = '' ): mixed
    - Посимвольный токенизатор шорткодов `[et_pb_...]` переводит разрешенные атрибуты (`title`, `button_text`, `subhead`, `alt`, `heading` и др.) с безопасным экранированием `"`, `[`, `]`, игнорируя содержимое `[et_pb_code]` и `[et_pb_fullwidth_code]`.
 4. **Строгая фильтрация (`is_translatable_string`):**
    - Отсекает динамические переменные Divi (`$variable(...)`, `@ET-DC@...`), URL-ы, пути, домены, имена файлов, CSS-значения/цвета/единицы, JSON-строки, булевы/технические константы (`on`, `off`, `true`, `false`, `h1`–`h6`, `left`/`center`/`right`), snake_case идентификаторы и строки без букв (`\p{L}`).
+5. **Изоляция и SEO-локализация мигрированных фотогалерей (`.scat-migrated-gallery`):**
+   - Линейный сканер `split_protected_html_blocks()` изолирует блоки `<div class="scat-migrated-gallery">...</div>` (с учётом вложенных `<div>`) целиком до разбора HTML, чтобы десятки `alt` и `title` фотографий не попадали в словарь перевода.
+   - Метод `DiviParser::localize_migrated_gallery()` обновляет `title` (на `<a>`) и `alt` (на `<img>`) по шаблону `{Title} — фото N` (`uk`/`ru`) или `{Title} — photo N` (`en` и др.) и удаляет все `\r`/`\n` внутри блока, защищая CSS Grid от вставки `<br />` фильтром `wpautop()`.
 
 ---
 

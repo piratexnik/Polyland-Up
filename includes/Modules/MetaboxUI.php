@@ -472,6 +472,19 @@ final class MetaboxUI {
             }
         }
 
+        // Гарантированная SEO-локализация alt/title и сжатие в 1 строку для .scat-migrated-gallery (даже при clone_only)
+        if (
+            false !== stripos( $post_content, 'scat-migrated-gallery' )
+            && class_exists( \PolylangUp\Modules\DiviParser::class )
+            && method_exists( \PolylangUp\Modules\DiviParser::class, 'localize_migrated_galleries_in_content' )
+        ) {
+            $post_content = \PolylangUp\Modules\DiviParser::localize_migrated_galleries_in_content(
+                $post_content,
+                $post_title,
+                $target_lang
+            );
+        }
+
         // Закладка точки расширения для Этапа 6 (Умная перелинковка)
         if ( ! empty( $options['rewrite_links'] ) ) {
             if (
@@ -691,6 +704,19 @@ final class MetaboxUI {
                     $post_content          = \PolylangUp\Modules\LinkRewriter::rewrite_content( $post_content, $assigned_lang );
                     $rewritten_links_count = \PolylangUp\Modules\LinkRewriter::get_last_rewritten_count();
                 }
+            }
+
+            // Гарантированная SEO-локализация alt/title и сжатие в 1 строку для .scat-migrated-gallery
+            if (
+                false !== stripos( $post_content, 'scat-migrated-gallery' )
+                && class_exists( \PolylangUp\Modules\DiviParser::class )
+                && method_exists( \PolylangUp\Modules\DiviParser::class, 'localize_migrated_galleries_in_content' )
+            ) {
+                $post_content = \PolylangUp\Modules\DiviParser::localize_migrated_galleries_in_content(
+                    $post_content,
+                    $post_title,
+                    $assigned_lang
+                );
             }
 
             SameSlug::$forced_lang = $assigned_lang;
