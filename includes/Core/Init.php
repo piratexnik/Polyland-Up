@@ -31,13 +31,13 @@ final class Init {
 			Settings::init();
 			Updater::init();
 			MetaboxUI::init();
-			MenuDuplicator::init();
 			BulkArchiveTranslator::init();
 		}
 
-		// Модули одинаковых слагов, UI-строк и пагинации Loop работают как в админке, так и на фронтенде
+		// Модули одинаковых слагов, UI-строк, пагинации Loop и переключателя языков работают как в админке, так и на фронтенде
 		SameSlug::init();
 		StringsManager::init();
 		LoopPagination::init();
+		MenuDuplicator::init();
 	}
 }

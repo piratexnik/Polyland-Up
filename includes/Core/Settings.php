@@ -43,9 +43,44 @@ final class Settings {
             'pg_show_arrows'       => 1,
             'pg_show_status'       => 1,
             'rm_style'             => 'outline',
+            'ls_style'             => 'classic',
+            'ls_use_mobile_short'  => 1,
+            'ls_hide_current'      => 0,
+            'ls_separator'         => '|',
+            'ls_active_color'      => '#006d77',
+            'ls_text_color'        => '#334155',
         ];
 
-        return $defaults[ $key ] ?? '';
+        if ( array_key_exists( $key, $defaults ) ) {
+            return $defaults[ $key ];
+        }
+
+        if ( str_starts_with( $key, 'show_flag_' ) ) {
+            $lang_slug = substr( $key, 10 );
+            return ( 'ru' === $lang_slug ) ? 0 : 1;
+        }
+
+        if ( str_starts_with( $key, 'custom_label_' ) ) {
+            $lang_slug = substr( $key, 13 );
+            return match ( $lang_slug ) {
+                'uk'    => 'Українська',
+                'en'    => 'English',
+                'ru'    => 'Інша',
+                default => strtoupper( $lang_slug ),
+            };
+        }
+
+        if ( str_starts_with( $key, 'mobile_label_' ) ) {
+            $lang_slug = substr( $key, 13 );
+            return match ( $lang_slug ) {
+                'uk'    => 'Укр',
+                'en'    => 'En',
+                'ru'    => 'Інша',
+                default => ucfirst( $lang_slug ),
+            };
+        }
+
+        return '';
     }
 
     /**
@@ -343,6 +378,50 @@ final class Settings {
 
             $rm_style = sanitize_key( (string) ( $input['rm_style'] ?? 'outline' ) );
             $sanitized['rm_style'] = in_array( $rm_style, [ 'solid', 'outline', 'link' ], true ) ? $rm_style : 'outline';
+
+            return array_merge( $existing, $sanitized );
+        }
+
+        if ( 'lang_switcher' === $tab ) {
+            $sanitized = [];
+
+            $ls_style = sanitize_key( (string) ( $input['ls_style'] ?? 'classic' ) );
+            $sanitized['ls_style'] = in_array( $ls_style, [ 'classic', 'pills', 'minimal' ], true ) ? $ls_style : 'classic';
+
+            $sanitized['ls_use_mobile_short'] = ! empty( $input['ls_use_mobile_short'] ) ? 1 : 0;
+            $sanitized['ls_hide_current']     = ! empty( $input['ls_hide_current'] ) ? 1 : 0;
+            $sanitized['ls_separator']        = sanitize_text_field( trim( (string) ( $input['ls_separator'] ?? '|' ) ) );
+            $sanitized['ls_active_color']     = sanitize_hex_color( (string) ( $input['ls_active_color'] ?? '' ) ) ?: '#006d77';
+            $sanitized['ls_text_color']       = sanitize_hex_color( (string) ( $input['ls_text_color'] ?? '' ) ) ?: '#334155';
+
+            $lang_slugs = [];
+            if ( function_exists( 'pll_languages_list' ) ) {
+                $lang_slugs = (array) pll_languages_list( [ 'fields' => 'slug' ] );
+            }
+            if ( empty( $lang_slugs ) ) {
+                $lang_slugs = [ 'uk', 'en', 'ru' ];
+            }
+            foreach ( array_keys( $input ) as $in_key ) {
+                $in_key = (string) $in_key;
+                if ( str_starts_with( $in_key, 'custom_label_' ) ) {
+                    $lang_slugs[] = substr( $in_key, 13 );
+                } elseif ( str_starts_with( $in_key, 'mobile_label_' ) ) {
+                    $lang_slugs[] = substr( $in_key, 13 );
+                } elseif ( str_starts_with( $in_key, 'show_flag_' ) ) {
+                    $lang_slugs[] = substr( $in_key, 10 );
+                }
+            }
+            $lang_slugs = array_values( array_unique( array_filter( array_map( 'sanitize_key', $lang_slugs ) ) ) );
+
+            foreach ( $lang_slugs as $slug ) {
+                $flag_key   = 'show_flag_' . $slug;
+                $desk_key   = 'custom_label_' . $slug;
+                $mobile_key = 'mobile_label_' . $slug;
+
+                $sanitized[ $flag_key ]   = ! empty( $input[ $flag_key ] ) ? 1 : 0;
+                $sanitized[ $desk_key ]   = sanitize_text_field( trim( (string) ( $input[ $desk_key ] ?? '' ) ) );
+                $sanitized[ $mobile_key ] = sanitize_text_field( trim( (string) ( $input[ $mobile_key ] ?? '' ) ) );
+            }
 
             return array_merge( $existing, $sanitized );
         }

@@ -3,25 +3,54 @@ declare(strict_types=1);
 
 namespace PolylangUp\Modules;
 
+use PolylangUp\Core\Settings;
+
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
 /**
- * Модуль «🍔 AI Дубликатор и Переводчик Меню» для WordPress, Polylang и Divi 5.
+ * Модуль «🍔 AI Дубликатор и Переводчик Меню» и переключатель языков [plu_lang_switcher] для WordPress, Polylang и Divi 5.
  */
 final class MenuDuplicator {
+
+    /**
+     * Флаг однократного вывода инлайн-стилей переключателя языков на странице.
+     */
+    private static bool $ls_styles_printed = false;
 
     /**
      * Инициализация хуков модуля.
      */
     public static function init(): void {
+        // Фронтенд и Divi Builder: шорткод переключателя языков [plu_lang_switcher]
+        add_shortcode( 'plu_lang_switcher', [ self::class, 'render_shortcode_lang_switcher' ] );
+
+        // Гарантированное раскрытие шорткода внутри модулей и блоков Divi 5
+        add_filter( 'et_pb_module_content', [ self::class, 'process_divi_shortcodes' ], 20 );
+        add_filter( 'et_module_shortcode_output', [ self::class, 'process_divi_shortcodes' ], 20 );
+        add_filter( 'render_block', [ self::class, 'process_divi_shortcodes' ], 12 );
+
         if ( ! is_admin() ) {
             return;
         }
 
         add_action( 'wp_ajax_plu_duplicate_menu', [ self::class, 'ajax_duplicate_menu' ] );
         add_action( 'admin_notices', [ self::class, 'render_nav_menus_notice' ] );
+    }
+
+    /**
+     * Раскрывает шорткод [plu_lang_switcher] внутри модулей и блоков Divi 5.
+     *
+     * @param mixed $content HTML-содержимое модуля или блока.
+     * @return mixed
+     */
+    public static function process_divi_shortcodes( mixed $content ): mixed {
+        if ( ! is_string( $content ) || ! str_contains( $content, '[plu_lang_switcher' ) ) {
+            return $content;
+        }
+
+        return do_shortcode( $content );
     }
 
     /**
@@ -81,12 +110,10 @@ final class MenuDuplicator {
                 </p>
             </div>
             <?php
-            return;
-        }
-
-        $default_translator = (string) plu_get_option( 'default_translator', 'gtx' );
-        $default_mode       = 'gemini' === $default_translator ? 'gemini' : 'gtx';
-        ?>
+        } else {
+            $default_translator = (string) plu_get_option( 'default_translator', 'gtx' );
+            $default_mode       = 'gemini' === $default_translator ? 'gemini' : 'gtx';
+            ?>
         <div class="plu-menu-duplicator-card" id="plu-menu-duplicator-box">
             <h2 style="margin-top:0;"><?php esc_html_e( '🍔 AI Дубликатор и Переводчик Меню', 'polyland-up' ); ?></h2>
             <p class="description" style="margin-bottom: 18px;">
@@ -218,6 +245,522 @@ final class MenuDuplicator {
             <div id="plu-menu-duplicator-log" class="plu-duplicator-log" style="margin-top:16px; max-width:780px;"></div>
         </div>
         <?php
+        }
+
+        self::render_lang_switcher_card( $languages );
+    }
+
+    /**
+     * Значения по умолчанию для индивидуальных настроек языка в переключателе [plu_lang_switcher].
+     *
+     * @param string $lang_slug Код языка (uk, en, ru и т.д.).
+     * @param string $lang_name Название языка из Polylang.
+     * @return array{show_flag: int, custom_label: string, mobile_label: string}
+     */
+    public static function get_lang_switcher_defaults( string $lang_slug, string $lang_name = '' ): array {
+        $show_flag = ( 'ru' === $lang_slug ) ? 0 : 1;
+
+        $custom_label = match ( $lang_slug ) {
+            'uk'    => 'Українська',
+            'en'    => 'English',
+            'ru'    => 'Інша',
+            default => ( '' !== $lang_name ? $lang_name : strtoupper( $lang_slug ) ),
+        };
+
+        $mobile_label = match ( $lang_slug ) {
+            'uk'    => 'Укр',
+            'en'    => 'En',
+            'ru'    => 'Інша',
+            default => ucfirst( $lang_slug ),
+        };
+
+        return [
+            'show_flag'    => $show_flag,
+            'custom_label' => $custom_label,
+            'mobile_label' => $mobile_label,
+        ];
+    }
+
+    /**
+     * Отрисовка блока настроек, шпаргалки и Live Preview переключателя языков [plu_lang_switcher].
+     *
+     * @param array<int, mixed> $languages Список объектов языков Polylang.
+     */
+    private static function render_lang_switcher_card( array $languages ): void {
+        if ( empty( $languages ) ) {
+            $languages = [
+                (object) [ 'slug' => 'uk', 'name' => 'Українська', 'flag' => '' ],
+                (object) [ 'slug' => 'en', 'name' => 'English', 'flag' => '' ],
+                (object) [ 'slug' => 'ru', 'name' => 'Русский', 'flag' => '' ],
+            ];
+        }
+
+        $ls_style            = (string) plu_get_option( 'ls_style', Settings::get_default( 'ls_style' ) );
+        $ls_use_mobile_short = (int) plu_get_option( 'ls_use_mobile_short', Settings::get_default( 'ls_use_mobile_short' ) );
+        $ls_hide_current     = (int) plu_get_option( 'ls_hide_current', Settings::get_default( 'ls_hide_current' ) );
+        $ls_separator        = (string) plu_get_option( 'ls_separator', Settings::get_default( 'ls_separator' ) );
+        $ls_active_color     = sanitize_hex_color( (string) plu_get_option( 'ls_active_color', Settings::get_default( 'ls_active_color' ) ) ) ?: '#006d77';
+        $ls_text_color       = sanitize_hex_color( (string) plu_get_option( 'ls_text_color', Settings::get_default( 'ls_text_color' ) ) ) ?: '#334155';
+
+        $shortcodes = [
+            [
+                'code' => '[plu_lang_switcher]',
+                'desc' => __( 'Базовый вывод по настройкам ниже.', 'polyland-up' ),
+            ],
+            [
+                'code' => '[plu_lang_switcher style="inline" show_mobile_short="1"]',
+                'desc' => __( 'Пример с параметрами (строчный стиль и принудительные короткие коды на мобильных).', 'polyland-up' ),
+            ],
+        ];
+
+        $lang_rows = [];
+        foreach ( $languages as $lang_obj ) {
+            if ( ! is_object( $lang_obj ) || empty( $lang_obj->slug ) ) {
+                continue;
+            }
+            $slug     = (string) $lang_obj->slug;
+            $name     = (string) ( $lang_obj->name ?? strtoupper( $slug ) );
+            $defaults = self::get_lang_switcher_defaults( $slug, $name );
+
+            $flag_html = '';
+            if ( ! empty( $lang_obj->flag ) && is_string( $lang_obj->flag ) ) {
+                $flag_html = $lang_obj->flag;
+            } elseif ( ! empty( $lang_obj->flag_url ) && is_string( $lang_obj->flag_url ) ) {
+                $flag_html = sprintf(
+                    '<img src="%s" alt="%s" width="16" height="11" />',
+                    esc_url( $lang_obj->flag_url ),
+                    esc_attr( $name )
+                );
+            }
+
+            $show_flag_val    = (int) plu_get_option( 'show_flag_' . $slug, $defaults['show_flag'] );
+            $custom_label_val = (string) plu_get_option( 'custom_label_' . $slug, $defaults['custom_label'] );
+            $mobile_label_val = (string) plu_get_option( 'mobile_label_' . $slug, $defaults['mobile_label'] );
+
+            $lang_rows[] = [
+                'slug'         => $slug,
+                'name'         => $name,
+                'flag_html'    => $flag_html,
+                'show_flag'    => $show_flag_val,
+                'custom_label' => '' !== $custom_label_val ? $custom_label_val : $defaults['custom_label'],
+                'mobile_label' => '' !== $mobile_label_val ? $mobile_label_val : $defaults['mobile_label'],
+            ];
+        }
+        ?>
+        <div class="plu-menu-duplicator-card plu-ls-admin-card" id="plu-lang-switcher-box" style="margin-top:24px;">
+            <h2 style="margin-top:0;"><?php esc_html_e( '🌐 Переключатель языков для шапки Divi 5 ([plu_lang_switcher])', 'polyland-up' ); ?></h2>
+
+            <!-- Справочная памятка с кнопками копирования в 1 клик -->
+            <div class="plu-ls-guide-box">
+                <div class="plu-pg-cheatsheet" style="margin-bottom:12px;">
+                    <?php foreach ( $shortcodes as $sc ) : ?>
+                        <div class="plu-pg-sc-row">
+                            <button
+                                type="button"
+                                class="button button-small plu-pg-copy-btn"
+                                data-copy-value="<?php echo esc_attr( $sc['code'] ); ?>"
+                                title="<?php esc_attr_e( 'Копировать шорткод', 'polyland-up' ); ?>"
+                            >
+                                &#128203; <code><?php echo esc_html( $sc['code'] ); ?></code>
+                            </button>
+                            <span class="plu-pg-sc-desc"><?php echo esc_html( $sc['desc'] ); ?></span>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+                <div class="plu-ls-instruction-notice">
+                    <strong><?php esc_html_e( 'Инструкция:', 'polyland-up' ); ?></strong>
+                    <?php esc_html_e( 'Вставьте шорткод [plu_lang_switcher] в обычный модуль Text или Code в верхней полоске шапки Divi 5 Theme Builder (вместо модуля Menu). Переключатель всегда остается компактной горизонтальной строкой на ПК и смартфонах и никогда не сворачивается в гамбургер!', 'polyland-up' ); ?>
+                </div>
+            </div>
+
+            <!-- Живое превью (Live Preview: Desktop & Mobile) -->
+            <div class="plu-ls-preview-section">
+                <h3 style="margin-top:0; margin-bottom:10px;"><?php esc_html_e( '👁 Живое превью (Live Preview)', 'polyland-up' ); ?></h3>
+                <div
+                    class="plu-ls-preview-grid"
+                    id="plu-ls-live-preview"
+                    style="--plu-ls-active:<?php echo esc_attr( $ls_active_color ); ?>;--plu-ls-text:<?php echo esc_attr( $ls_text_color ); ?>;"
+                >
+                    <div class="plu-ls-preview-device">
+                        <div class="plu-ls-preview-device-title"><?php esc_html_e( '🖥 ПК (Desktop)', 'polyland-up' ); ?></div>
+                        <div class="plu-ls-preview-stage plu-ls-stage-desktop">
+                            <nav class="plu-lang-switcher plu-ls-style-<?php echo esc_attr( $ls_style ); ?>" id="plu-ls-preview-desktop" aria-label="Desktop preview"></nav>
+                        </div>
+                    </div>
+
+                    <div class="plu-ls-preview-device">
+                        <div class="plu-ls-preview-device-title"><?php esc_html_e( '📱 Смартфон (Mobile < 768px)', 'polyland-up' ); ?></div>
+                        <div class="plu-ls-preview-stage plu-ls-stage-mobile">
+                            <div class="plu-ls-mobile-frame">
+                                <span class="plu-ls-mobile-logo">LOGO</span>
+                                <nav class="plu-lang-switcher plu-ls-style-<?php echo esc_attr( $ls_style ); ?> <?php echo $ls_use_mobile_short ? 'plu-ls-has-mobile-short' : ''; ?>" id="plu-ls-preview-mobile" aria-label="Mobile preview"></nav>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Форма настроек переключателя языков -->
+            <form method="post" action="options.php" id="plu-ls-settings-form">
+                <?php settings_fields( Settings::OPTION_GROUP ); ?>
+                <input type="hidden" name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[_plu_tab]" value="lang_switcher" />
+
+                <h3 style="margin-top:20px; margin-bottom:10px;"><?php esc_html_e( '1. Индивидуальные настройки для каждого языка', 'polyland-up' ); ?></h3>
+                <div class="plu-strings-table-scroll">
+                    <table class="wp-list-table widefat fixed striped plu-ls-langs-table">
+                        <thead>
+                            <tr>
+                                <th style="width:140px;"><?php esc_html_e( 'Язык', 'polyland-up' ); ?></th>
+                                <th style="width:140px; text-align:center;"><?php esc_html_e( 'Показывать флаг', 'polyland-up' ); ?></th>
+                                <th><?php esc_html_e( 'Название на ПК (Desktop)', 'polyland-up' ); ?></th>
+                                <th><?php esc_html_e( 'Короткий код для мобильных (< 768px)', 'polyland-up' ); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ( $lang_rows as $row ) : ?>
+                                <tr class="plu-ls-lang-row" data-lang-slug="<?php echo esc_attr( $row['slug'] ); ?>">
+                                    <td>
+                                        <span class="plu-ls-lang-badge">
+                                            <?php if ( '' !== $row['flag_html'] ) : ?>
+                                                <span class="plu-ls-admin-flag" data-flag-html="<?php echo esc_attr( $row['flag_html'] ); ?>"><?php echo wp_kses_post( $row['flag_html'] ); ?></span>
+                                            <?php endif; ?>
+                                            <strong><?php echo esc_html( strtoupper( $row['slug'] ) ); ?></strong>
+                                            <span class="description">(<?php echo esc_html( $row['name'] ); ?>)</span>
+                                        </span>
+                                    </td>
+                                    <td style="text-align:center;">
+                                        <input
+                                            type="checkbox"
+                                            class="plu-ls-live-flag"
+                                            data-lang="<?php echo esc_attr( $row['slug'] ); ?>"
+                                            name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[show_flag_<?php echo esc_attr( $row['slug'] ); ?>]"
+                                            value="1"
+                                            <?php checked( 1, $row['show_flag'] ); ?>
+                                        />
+                                    </td>
+                                    <td>
+                                        <input
+                                            type="text"
+                                            class="regular-text plu-ls-live-desktop-label"
+                                            style="width:100%;"
+                                            data-lang="<?php echo esc_attr( $row['slug'] ); ?>"
+                                            name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[custom_label_<?php echo esc_attr( $row['slug'] ); ?>]"
+                                            value="<?php echo esc_attr( $row['custom_label'] ); ?>"
+                                        />
+                                    </td>
+                                    <td>
+                                        <input
+                                            type="text"
+                                            class="regular-text plu-ls-live-mobile-label"
+                                            style="width:100%;"
+                                            data-lang="<?php echo esc_attr( $row['slug'] ); ?>"
+                                            name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[mobile_label_<?php echo esc_attr( $row['slug'] ); ?>]"
+                                            value="<?php echo esc_attr( $row['mobile_label'] ); ?>"
+                                        />
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h3 style="margin-top:20px; margin-bottom:10px;"><?php esc_html_e( '2. Общие настройки вида переключателя', 'polyland-up' ); ?></h3>
+                <table class="form-table" role="presentation">
+                    <tbody>
+                        <tr>
+                            <th scope="row"><label for="plu_ls_style"><?php esc_html_e( 'Стиль переключателя', 'polyland-up' ); ?></label></th>
+                            <td>
+                                <select id="plu_ls_style" name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[ls_style]" class="regular-text plu-ls-live-ctrl">
+                                    <option value="classic" <?php selected( 'classic', $ls_style ); ?>><?php esc_html_e( 'Классический текстовый (Укр | En | Інша с подчеркиванием активного)', 'polyland-up' ); ?></option>
+                                    <option value="pills" <?php selected( 'pills', $ls_style ); ?>><?php esc_html_e( 'Кнопки-капсулы (Pills с заливкой активного языка)', 'polyland-up' ); ?></option>
+                                    <option value="minimal" <?php selected( 'minimal', $ls_style ); ?>><?php esc_html_e( 'Минималистичный без разделителей', 'polyland-up' ); ?></option>
+                                </select>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><?php esc_html_e( 'Адаптивность и отображение', 'polyland-up' ); ?></th>
+                            <td>
+                                <fieldset>
+                                    <label for="plu_ls_use_mobile_short" style="display:block; margin-bottom:8px;">
+                                        <input
+                                            type="checkbox"
+                                            id="plu_ls_use_mobile_short"
+                                            class="plu-ls-live-ctrl"
+                                            name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[ls_use_mobile_short]"
+                                            value="1"
+                                            <?php checked( 1, $ls_use_mobile_short ); ?>
+                                        />
+                                        <?php esc_html_e( 'На мобильных экранах (< 768px) автоматически показывать короткие коды (Укр / En / Інша) вместо полных названий', 'polyland-up' ); ?>
+                                    </label>
+                                    <label for="plu_ls_hide_current" style="display:block;">
+                                        <input
+                                            type="checkbox"
+                                            id="plu_ls_hide_current"
+                                            class="plu-ls-live-ctrl"
+                                            name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[ls_hide_current]"
+                                            value="1"
+                                            <?php checked( 1, $ls_hide_current ); ?>
+                                        />
+                                        <?php esc_html_e( 'Скрывать текущий активный язык', 'polyland-up' ); ?>
+                                    </label>
+                                </fieldset>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="plu_ls_separator"><?php esc_html_e( 'Разделитель между языками (для стиля classic)', 'polyland-up' ); ?></label></th>
+                            <td>
+                                <input
+                                    type="text"
+                                    id="plu_ls_separator"
+                                    class="small-text plu-ls-live-ctrl"
+                                    name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[ls_separator]"
+                                    value="<?php echo esc_attr( $ls_separator ); ?>"
+                                />
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="plu_ls_active_color"><?php esc_html_e( 'Цвет активного языка', 'polyland-up' ); ?></label></th>
+                            <td>
+                                <input
+                                    type="color"
+                                    id="plu_ls_active_color"
+                                    class="plu-ls-live-ctrl"
+                                    name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[ls_active_color]"
+                                    value="<?php echo esc_attr( $ls_active_color ); ?>"
+                                />
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="plu_ls_text_color"><?php esc_html_e( 'Цвет неактивных языков', 'polyland-up' ); ?></label></th>
+                            <td>
+                                <input
+                                    type="color"
+                                    id="plu_ls_text_color"
+                                    class="plu-ls-live-ctrl"
+                                    name="<?php echo esc_attr( Settings::OPTION_NAME ); ?>[ls_text_color]"
+                                    value="<?php echo esc_attr( $ls_text_color ); ?>"
+                                />
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <?php submit_button( __( 'Сохранить настройки переключателя', 'polyland-up' ) ); ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    /**
+     * Шорткод [plu_lang_switcher]: адаптивный переключатель языков без мобильного гамбургера.
+     *
+     * @param mixed $atts Атрибуты шорткода.
+     * @return string HTML-разметка переключателя.
+     */
+    public static function render_shortcode_lang_switcher( mixed $atts = [] ): string {
+        $atts = shortcode_atts(
+            [
+                'style'             => (string) plu_get_option( 'ls_style', Settings::get_default( 'ls_style' ) ),
+                'show_mobile_short' => (string) (int) plu_get_option( 'ls_use_mobile_short', Settings::get_default( 'ls_use_mobile_short' ) ),
+                'hide_current'      => (string) (int) plu_get_option( 'ls_hide_current', Settings::get_default( 'ls_hide_current' ) ),
+                'separator'         => (string) plu_get_option( 'ls_separator', Settings::get_default( 'ls_separator' ) ),
+                'class'             => '',
+            ],
+            is_array( $atts ) ? $atts : [],
+            'plu_lang_switcher'
+        );
+
+        $raw_style = sanitize_key( (string) $atts['style'] );
+        if ( 'inline' === $raw_style ) {
+            $raw_style = 'classic';
+        }
+        $style = in_array( $raw_style, [ 'classic', 'pills', 'minimal' ], true ) ? $raw_style : 'classic';
+
+        $use_mobile_short = in_array( strtolower( trim( (string) $atts['show_mobile_short'] ) ), [ '1', 'true', 'yes', 'on' ], true );
+        $hide_current     = in_array( strtolower( trim( (string) $atts['hide_current'] ) ), [ '1', 'true', 'yes', 'on' ], true );
+        $separator        = (string) $atts['separator'];
+        $extra_class      = sanitize_html_class( (string) $atts['class'] );
+
+        $languages = [];
+        if ( function_exists( 'pll_the_languages' ) ) {
+            $raw_langs = pll_the_languages( [ 'raw' => 1 ] );
+            if ( is_array( $raw_langs ) && ! empty( $raw_langs ) ) {
+                $languages = $raw_langs;
+            }
+        }
+
+        // Фоллбэк для Divi 5 Visual Builder или контекста без активного запроса
+        if ( empty( $languages ) ) {
+            $current_slug = function_exists( 'pll_current_language' ) ? (string) pll_current_language( 'slug' ) : '';
+            if ( '' === $current_slug && function_exists( 'pll_default_language' ) ) {
+                $current_slug = (string) pll_default_language( 'slug' );
+            }
+
+            $pll_list = function_exists( 'pll_languages_list' ) ? (array) pll_languages_list( [ 'fields' => '' ] ) : [];
+            if ( ! empty( $pll_list ) ) {
+                foreach ( $pll_list as $idx => $lang_obj ) {
+                    if ( ! is_object( $lang_obj ) || empty( $lang_obj->slug ) ) {
+                        continue;
+                    }
+                    $slug       = (string) $lang_obj->slug;
+                    $is_current = ( '' !== $current_slug ) ? ( $slug === $current_slug ) : ( 0 === $idx );
+                    $home_url   = function_exists( 'pll_home_url' ) ? (string) pll_home_url( $slug ) : home_url( '/' );
+                    $languages[ $slug ] = [
+                        'slug'         => $slug,
+                        'name'         => (string) ( $lang_obj->name ?? strtoupper( $slug ) ),
+                        'url'          => $home_url,
+                        'flag'         => (string) ( $lang_obj->flag ?? '' ),
+                        'flag_url'     => (string) ( $lang_obj->flag_url ?? '' ),
+                        'current_lang' => $is_current,
+                    ];
+                }
+            } else {
+                foreach ( [ 'uk' => 'Українська', 'en' => 'English', 'ru' => 'Русский' ] as $slug => $name ) {
+                    $languages[ $slug ] = [
+                        'slug'         => $slug,
+                        'name'         => $name,
+                        'url'          => home_url( '/' . $slug . '/' ),
+                        'flag'         => '',
+                        'flag_url'     => '',
+                        'current_lang' => ( 'uk' === $slug ),
+                    ];
+                }
+            }
+        }
+
+        if ( empty( $languages ) ) {
+            return '';
+        }
+
+        $items_html = [];
+        foreach ( $languages as $lang_key => $lang_data ) {
+            if ( ! is_array( $lang_data ) ) {
+                continue;
+            }
+
+            $slug       = sanitize_key( (string) ( $lang_data['slug'] ?? $lang_key ) );
+            $lang_name  = (string) ( $lang_data['name'] ?? strtoupper( $slug ) );
+            $url        = (string) ( $lang_data['url'] ?? '#' );
+            $is_current = ! empty( $lang_data['current_lang'] );
+
+            if ( '' === $slug || ( $hide_current && $is_current ) ) {
+                continue;
+            }
+
+            $defaults      = self::get_lang_switcher_defaults( $slug, $lang_name );
+            $show_flag     = (int) plu_get_option( 'show_flag_' . $slug, $defaults['show_flag'] );
+            $desktop_label = (string) plu_get_option( 'custom_label_' . $slug, $defaults['custom_label'] );
+            $mobile_label  = (string) plu_get_option( 'mobile_label_' . $slug, $defaults['mobile_label'] );
+
+            if ( '' === trim( $desktop_label ) ) {
+                $desktop_label = $defaults['custom_label'];
+            }
+            if ( '' === trim( $mobile_label ) ) {
+                $mobile_label = $defaults['mobile_label'];
+            }
+
+            $flag_output = '';
+            if ( 1 === $show_flag ) {
+                if ( ! empty( $lang_data['flag'] ) && is_string( $lang_data['flag'] ) ) {
+                    $flag_output = '<span class="plu-ls-flag" aria-hidden="true">' . $lang_data['flag'] . '</span>';
+                } elseif ( ! empty( $lang_data['flag_url'] ) && is_string( $lang_data['flag_url'] ) ) {
+                    $flag_output = sprintf(
+                        '<span class="plu-ls-flag" aria-hidden="true"><img src="%s" alt="%s" width="16" height="11" /></span>',
+                        esc_url( $lang_data['flag_url'] ),
+                        esc_attr( $lang_name )
+                    );
+                }
+            }
+
+            $labels_output = '<span class="plu-ls-label-desktop">' . esc_html( $desktop_label ) . '</span>';
+            if ( $use_mobile_short ) {
+                $labels_output .= '<span class="plu-ls-label-mobile">' . esc_html( $mobile_label ) . '</span>';
+            }
+
+            $link_classes = 'plu-ls-link' . ( $is_current ? ' is-active' : '' );
+            $aria_current = $is_current ? ' aria-current="page"' : '';
+
+            $items_html[] = sprintf(
+                '<a href="%s" class="%s" lang="%s" hreflang="%s"%s>%s%s</a>',
+                esc_url( $url ),
+                esc_attr( $link_classes ),
+                esc_attr( $slug ),
+                esc_attr( $slug ),
+                $aria_current,
+                $flag_output,
+                $labels_output
+            );
+        }
+
+        if ( empty( $items_html ) ) {
+            return '';
+        }
+
+        $sep_html = '';
+        if ( 'classic' === $style && '' !== trim( $separator ) ) {
+            $sep_html = '<span class="plu-ls-sep" aria-hidden="true">' . esc_html( $separator ) . '</span>';
+        }
+
+        $nav_classes = [
+            'plu-lang-switcher',
+            'plu-ls-style-' . $style,
+        ];
+        if ( $use_mobile_short ) {
+            $nav_classes[] = 'plu-ls-has-mobile-short';
+        }
+        if ( '' !== $extra_class ) {
+            $nav_classes[] = $extra_class;
+        }
+
+        $styles = self::render_ls_inline_styles_once();
+
+        return sprintf(
+            '%s<nav class="%s" aria-label="%s">%s</nav>',
+            $styles,
+            esc_attr( implode( ' ', $nav_classes ) ),
+            esc_attr__( 'Выбор языка', 'polyland-up' ),
+            implode( $sep_html, $items_html )
+        );
+    }
+
+    /**
+     * Выводит компактные инлайн-стили переключателя языков [plu_lang_switcher] один раз за страницу.
+     *
+     * @return string
+     */
+    private static function render_ls_inline_styles_once(): string {
+        if ( self::$ls_styles_printed ) {
+            return '';
+        }
+        self::$ls_styles_printed = true;
+
+        $active_color = sanitize_hex_color( (string) plu_get_option( 'ls_active_color', Settings::get_default( 'ls_active_color' ) ) ) ?: '#006d77';
+        $text_color   = sanitize_hex_color( (string) plu_get_option( 'ls_text_color', Settings::get_default( 'ls_text_color' ) ) ) ?: '#334155';
+
+        $css = sprintf(
+            ':root{--plu-ls-active:%1$s;--plu-ls-text:%2$s;}',
+            $active_color,
+            $text_color
+        );
+
+        $css .= '.plu-lang-switcher{display:inline-flex;align-items:center;flex-wrap:nowrap;gap:8px;line-height:1.2;white-space:nowrap;}'
+            . '.plu-lang-switcher .plu-ls-link{display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:var(--plu-ls-text);font-size:14px;font-weight:500;transition:color .18s ease,background-color .18s ease,border-color .18s ease;white-space:nowrap;}'
+            . '.plu-lang-switcher .plu-ls-link:hover,.plu-lang-switcher .plu-ls-link.is-active{color:var(--plu-ls-active);}'
+            . '.plu-lang-switcher .plu-ls-link.is-active{font-weight:700;}'
+            . '.plu-lang-switcher.plu-ls-style-classic .plu-ls-link.is-active{text-decoration:underline;text-underline-offset:4px;text-decoration-thickness:2px;}'
+            . '.plu-lang-switcher.plu-ls-style-pills .plu-ls-link{padding:4px 10px;border-radius:999px;border:1px solid rgba(148,163,184,.45);}'
+            . '.plu-lang-switcher.plu-ls-style-pills .plu-ls-link.is-active{background:var(--plu-ls-active);color:#ffffff;border-color:var(--plu-ls-active);}'
+            . '.plu-lang-switcher .plu-ls-flag{display:inline-flex;align-items:center;line-height:1;}'
+            . '.plu-lang-switcher .plu-ls-flag img{width:16px;height:auto;display:block;border-radius:2px;}'
+            . '.plu-lang-switcher .plu-ls-sep{color:var(--plu-ls-text);opacity:.45;user-select:none;font-size:13px;}'
+            . '.plu-lang-switcher .plu-ls-label-mobile{display:none;}'
+            . '@media (max-width:767px){'
+            . '.plu-lang-switcher{gap:6px;}'
+            . '.plu-lang-switcher.plu-ls-has-mobile-short .plu-ls-label-desktop{display:none;}'
+            . '.plu-lang-switcher.plu-ls-has-mobile-short .plu-ls-label-mobile{display:inline;}'
+            . '}';
+
+        return '<style id="plu-lang-switcher-css">' . $css . '</style>';
     }
 
     /**

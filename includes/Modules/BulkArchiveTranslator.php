@@ -109,7 +109,7 @@ final class BulkArchiveTranslator {
 
 			$uk_words = (int) preg_match_all( '/(?<![\p{L}])(ми|на\s+виставці|виставці|у\s+місті|місті|підсумки|новинки|семінар|виставка|та|що|для|від|про|року|рік|або|якщо|буде|вони|його|неї|між|під|після|зараз|також|лише|більше|шановні|повідомляємо|працює|відкриття|наших|клієнтів)(?![\p{L}])/iu', $clean_no_brands );
 			$ru_words = (int) preg_match_all( '/(?<![\p{L}])(мы|на\s+выставке|выставке|выставка|итоги|городе|семинар|или|что|был|была|были|году|год|также|только|если|будет|они|его|между|после|сейчас|более|котор[а-яё]*|этом|этого|наша|компания|лучшие|направления|поздравляем|приглашаем|сети|бизнес|строительство|реконструкция|производитель|рынка)(?![\p{L}])/iu', $clean_no_brands );
-			$ru_conj  = (int) preg_match_all( '/(?<=^|\s)[ис](?=\s|$)/ui', $clean_no_brands );
+			$ru_conj  = (int) preg_match_all( '/(?<=^|[\s«"(])[ис](?=[\s»"),.]|$)/ui', $clean_no_brands );
 
 			$uk_score = ( $uk_unique_chars * 4 ) + ( $uk_words * 3 );
 			$ru_score = ( $ru_unique_chars * 4 ) + ( ( $ru_words + $ru_conj ) * 3 );
@@ -816,7 +816,14 @@ final class BulkArchiveTranslator {
 			// КРИТИЧНО: Проверяем, не принадлежит ли кандидат уже другой статье в Polylang
 			if ( $source_post_id > 0 && function_exists( 'pll_get_post_translations' ) ) {
 				$cand_translations = (array) pll_get_post_translations( $pid );
-				if ( '' !== $source_lang && ! empty( $cand_translations[ $source_lang ] ) && (int) $cand_translations[ $source_lang ] !== $source_post_id ) {
+				$eff_source_lang   = '' !== $source_lang
+					? $source_lang
+					: ( function_exists( 'pll_get_post_language' ) ? (string) pll_get_post_language( $source_post_id, 'slug' ) : '' );
+
+				if ( '' !== $eff_source_lang && ! empty( $cand_translations[ $eff_source_lang ] ) && (int) $cand_translations[ $eff_source_lang ] !== $source_post_id ) {
+					continue;
+				}
+				if ( count( $cand_translations ) > 1 && ! in_array( $source_post_id, array_map( 'intval', $cand_translations ), true ) ) {
 					continue;
 				}
 			}
@@ -858,6 +865,9 @@ final class BulkArchiveTranslator {
 				if ( function_exists( 'pll_get_post_translations' ) ) {
 					$cand_translations = (array) pll_get_post_translations( (int) $s_id );
 					if ( '' !== $assigned_lang && ! empty( $cand_translations[ $assigned_lang ] ) && (int) $cand_translations[ $assigned_lang ] !== (int) $post->ID ) {
+						continue;
+					}
+					if ( count( $cand_translations ) > 1 && ! in_array( (int) $post->ID, array_map( 'intval', $cand_translations ), true ) ) {
 						continue;
 					}
 				}
@@ -1194,6 +1204,9 @@ final class BulkArchiveTranslator {
 				if ( function_exists( 'pll_get_post_translations' ) ) {
 					$cand_translations = (array) pll_get_post_translations( (int) $s_id );
 					if ( '' !== $entry_assigned_lang && ! empty( $cand_translations[ $entry_assigned_lang ] ) && (int) $cand_translations[ $entry_assigned_lang ] !== (int) $entry_post->ID ) {
+						continue;
+					}
+					if ( count( $cand_translations ) > 1 && ! in_array( (int) $entry_post->ID, array_map( 'intval', $cand_translations ), true ) ) {
 						continue;
 					}
 				}

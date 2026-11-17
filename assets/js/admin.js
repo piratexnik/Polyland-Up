@@ -781,8 +781,8 @@
             const $previewStatus = $('#plu-preview-pg-status');
             const $previewRmBtn = $('#plu-preview-rm-btn');
 
-            // Копирование шорткодов из шпаргалки в 1 клик
-            $pgBox.on('click', '.plu-pg-copy-btn', function(e) {
+            // Копирование шорткодов из шпаргалки в 1 клик (работает во всех вкладках)
+            $(document).on('click', '.plu-pg-copy-btn', function(e) {
                 e.preventDefault();
                 const $btn = $(this);
                 const textToCopy = String($btn.attr('data-copy-value') || '');
@@ -1433,6 +1433,111 @@
                 $processLog.empty().hide();
                 $logToolbar.hide();
             });
+        }
+
+        // ============================================================
+        // 8. Живое превью (Live Preview) переключателя языков [plu_lang_switcher]
+        // ============================================================
+        const $lsBox = $('#plu-lang-switcher-box');
+        if ($lsBox.length) {
+            const $lsPreview = $('#plu-ls-live-preview');
+            const $lsDesktopNav = $('#plu-ls-preview-desktop');
+            const $lsMobileNav = $('#plu-ls-preview-mobile');
+
+            // Универсальный клик-копирование, если открыта вкладка menus (где нет $pgBox)
+            if (!$('#plu-pagination-admin-box').length) {
+                $lsBox.on('click', '.plu-pg-copy-btn', function(e) {
+                    e.preventDefault();
+                    const $btn = $(this);
+                    const textToCopy = String($btn.attr('data-copy-value') || '');
+                    if (!textToCopy) {
+                        return;
+                    }
+                    const markCopied = function() {
+                        const origHtml = $btn.data('orig-html') || $btn.html();
+                        $btn.data('orig-html', origHtml);
+                        $btn.addClass('is-copied').text('✓ Скопировано!');
+                        setTimeout(function() {
+                            $btn.removeClass('is-copied').html(origHtml);
+                        }, 1400);
+                    };
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(textToCopy).then(markCopied).catch(function() {});
+                    } else {
+                        const $tmp = $('<textarea>').val(textToCopy).appendTo('body').select();
+                        try {
+                            document.execCommand('copy');
+                            markCopied();
+                        } catch (err) {}
+                        $tmp.remove();
+                    }
+                });
+            }
+
+            const renderLangSwitcherPreview = function() {
+                const style = String($('#plu_ls_style').val() || 'classic');
+                const useMobileShort = $('#plu_ls_use_mobile_short').is(':checked');
+                const hideCurrent = $('#plu_ls_hide_current').is(':checked');
+                const separator = String($('#plu_ls_separator').val() || '');
+                const activeColor = String($('#plu_ls_active_color').val() || '#006d77');
+                const textColor = String($('#plu_ls_text_color').val() || '#334155');
+
+                if ($lsPreview.length) {
+                    $lsPreview.get(0).style.setProperty('--plu-ls-active', activeColor);
+                    $lsPreview.get(0).style.setProperty('--plu-ls-text', textColor);
+                }
+
+                const items = [];
+                $lsBox.find('.plu-ls-lang-row').each(function(idx) {
+                    const $row = $(this);
+                    const slug = String($row.attr('data-lang-slug') || '');
+                    const isCurrent = (idx === 0);
+                    if (hideCurrent && isCurrent) {
+                        return;
+                    }
+
+                    const showFlag = $row.find('.plu-ls-live-flag').is(':checked');
+                    const flagHtmlRaw = String($row.find('.plu-ls-admin-flag').attr('data-flag-html') || '');
+                    const desktopLabel = String($row.find('.plu-ls-live-desktop-label').val() || slug.toUpperCase());
+                    const mobileLabel = String($row.find('.plu-ls-live-mobile-label').val() || slug.toUpperCase());
+
+                    let flagPart = '';
+                    if (showFlag) {
+                        if (flagHtmlRaw) {
+                            flagPart = `<span class="plu-ls-flag" aria-hidden="true">${flagHtmlRaw}</span>`;
+                        } else {
+                            flagPart = `<span class="plu-ls-flag plu-ls-flag-fallback" aria-hidden="true">&#127987;</span>`;
+                        }
+                    }
+
+                    const activeClass = isCurrent ? ' is-active' : '';
+                    const mobileSpan = useMobileShort ? `<span class="plu-ls-label-mobile">${esc(mobileLabel)}</span>` : '';
+
+                    items.push(
+                        `<a href="#preview-${esc(slug)}" onclick="return false;" class="plu-ls-link${activeClass}">` +
+                        `${flagPart}<span class="plu-ls-label-desktop">${esc(desktopLabel)}</span>${mobileSpan}` +
+                        `</a>`
+                    );
+                });
+
+                const sepHtml = (style === 'classic' && separator.trim() !== '')
+                    ? `<span class="plu-ls-sep" aria-hidden="true">${esc(separator)}</span>`
+                    : '';
+                const innerHtml = items.join(sepHtml);
+
+                $lsDesktopNav
+                    .removeClass('plu-ls-style-classic plu-ls-style-pills plu-ls-style-minimal')
+                    .addClass('plu-ls-style-' + style)
+                    .html(innerHtml);
+
+                $lsMobileNav
+                    .removeClass('plu-ls-style-classic plu-ls-style-pills plu-ls-style-minimal plu-ls-has-mobile-short')
+                    .addClass('plu-ls-style-' + style + (useMobileShort ? ' plu-ls-has-mobile-short' : ''))
+                    .html(innerHtml);
+            };
+
+            $lsBox.on('input change', '.plu-ls-live-flag, .plu-ls-live-desktop-label, .plu-ls-live-mobile-label, .plu-ls-live-ctrl', renderLangSwitcherPreview);
+            renderLangSwitcherPreview();
         }
 
     });
