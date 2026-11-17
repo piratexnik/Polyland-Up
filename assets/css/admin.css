@@ -1300,16 +1300,14 @@
 }
 
 .plu-ls-preview-grid .plu-lang-switcher .plu-ls-flag {
-    display: inline-flex;
-    align-items: center;
-    line-height: 1;
-}
-
-.plu-ls-preview-grid .plu-lang-switcher .plu-ls-flag img {
-    width: 16px;
+    width: 18px;
     height: auto;
-    display: block;
+    max-height: 14px;
+    object-fit: contain;
+    display: inline-block;
+    vertical-align: middle;
     border-radius: 2px;
+    flex-shrink: 0;
 }
 
 .plu-ls-preview-grid .plu-lang-switcher .plu-ls-sep {

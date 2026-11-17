@@ -322,15 +322,9 @@ final class MenuDuplicator {
             $name     = (string) ( $lang_obj->name ?? strtoupper( $slug ) );
             $defaults = self::get_lang_switcher_defaults( $slug, $name );
 
-            $flag_html = '';
-            if ( ! empty( $lang_obj->flag ) && is_string( $lang_obj->flag ) ) {
-                $flag_html = $lang_obj->flag;
-            } elseif ( ! empty( $lang_obj->flag_url ) && is_string( $lang_obj->flag_url ) ) {
-                $flag_html = sprintf(
-                    '<img src="%s" alt="%s" width="16" height="11" />',
-                    esc_url( $lang_obj->flag_url ),
-                    esc_attr( $name )
-                );
+            $flag_html = self::build_flag_html( $lang_obj->flag ?? '', $slug );
+            if ( '' === $flag_html && ! empty( $lang_obj->flag_url ) ) {
+                $flag_html = self::build_flag_html( $lang_obj->flag_url, $slug );
             }
 
             $show_flag_val    = (int) plu_get_option( 'show_flag_' . $slug, $defaults['show_flag'] );
@@ -661,14 +655,9 @@ final class MenuDuplicator {
 
             $flag_output = '';
             if ( 1 === $show_flag ) {
-                if ( ! empty( $lang_data['flag'] ) && is_string( $lang_data['flag'] ) ) {
-                    $flag_output = '<span class="plu-ls-flag" aria-hidden="true">' . $lang_data['flag'] . '</span>';
-                } elseif ( ! empty( $lang_data['flag_url'] ) && is_string( $lang_data['flag_url'] ) ) {
-                    $flag_output = sprintf(
-                        '<span class="plu-ls-flag" aria-hidden="true"><img src="%s" alt="%s" width="16" height="11" /></span>',
-                        esc_url( $lang_data['flag_url'] ),
-                        esc_attr( $lang_name )
-                    );
+                $flag_output = self::build_flag_html( $lang_data['flag'] ?? '', $slug );
+                if ( '' === $flag_output && ! empty( $lang_data['flag_url'] ) ) {
+                    $flag_output = self::build_flag_html( $lang_data['flag_url'], $slug );
                 }
             }
 
@@ -724,6 +713,60 @@ final class MenuDuplicator {
     }
 
     /**
+     * Формирует безопасный HTML-тег <img> для флага из сырого URL или HTML-строки Polylang.
+     *
+     * @param mixed  $flag_data Значение $lang['flag'] / $lang->flag или URL флага.
+     * @param string $lang_slug Код языка для атрибута alt.
+     * @return string
+     */
+    public static function build_flag_html( mixed $flag_data, string $lang_slug = '' ): string {
+        if ( ! is_string( $flag_data ) ) {
+            return '';
+        }
+
+        $raw = trim( $flag_data );
+        if ( '' === $raw ) {
+            return '';
+        }
+
+        $src = '';
+        if ( str_contains( $raw, '<img' ) ) {
+            if ( preg_match( '/\bsrc\s*=\s*(?:"([^"]+)"|\'([^\']+)\')/i', $raw, $matches ) ) {
+                $src = trim( '' !== ( $matches[1] ?? '' ) ? $matches[1] : ( $matches[2] ?? '' ) );
+            } else {
+                return function_exists( 'wp_kses' )
+                    ? wp_kses(
+                        $raw,
+                        [
+                            'img' => [
+                                'src'      => true,
+                                'alt'      => true,
+                                'class'    => true,
+                                'width'    => true,
+                                'height'   => true,
+                                'loading'  => true,
+                                'decoding' => true,
+                            ],
+                        ]
+                    )
+                    : '';
+            }
+        } elseif ( preg_match( '#^(https?:)?//#i', $raw ) || str_starts_with( $raw, '/' ) ) {
+            $src = $raw;
+        }
+
+        if ( '' === $src ) {
+            return '';
+        }
+
+        return sprintf(
+            '<img class="plu-ls-flag" src="%s" alt="%s" width="18" height="12" loading="lazy" decoding="async" />',
+            esc_url( $src ),
+            esc_attr( $lang_slug )
+        );
+    }
+
+    /**
      * Выводит компактные инлайн-стили переключателя языков [plu_lang_switcher] один раз за страницу.
      *
      * @return string
@@ -750,12 +793,11 @@ final class MenuDuplicator {
             . '.plu-lang-switcher.plu-ls-style-classic .plu-ls-link.is-active{text-decoration:underline;text-underline-offset:4px;text-decoration-thickness:2px;}'
             . '.plu-lang-switcher.plu-ls-style-pills .plu-ls-link{padding:4px 10px;border-radius:999px;border:1px solid rgba(148,163,184,.45);}'
             . '.plu-lang-switcher.plu-ls-style-pills .plu-ls-link.is-active{background:var(--plu-ls-active);color:#ffffff;border-color:var(--plu-ls-active);}'
-            . '.plu-lang-switcher .plu-ls-flag{display:inline-flex;align-items:center;line-height:1;}'
-            . '.plu-lang-switcher .plu-ls-flag img{width:16px;height:auto;display:block;border-radius:2px;}'
+            . '.plu-lang-switcher .plu-ls-flag{width:18px;height:auto;max-height:14px;object-fit:contain;display:inline-block;vertical-align:middle;border-radius:2px;flex-shrink:0;}'
             . '.plu-lang-switcher .plu-ls-sep{color:var(--plu-ls-text);opacity:.45;user-select:none;font-size:13px;}'
             . '.plu-lang-switcher .plu-ls-label-mobile{display:none;}'
             . '@media (max-width:767px){'
-            . '.plu-lang-switcher{gap:6px;}'
+            . '.plu-lang-switcher{flex-wrap:wrap;justify-content:flex-end;gap:6px;}'
             . '.plu-lang-switcher.plu-ls-has-mobile-short .plu-ls-label-desktop{display:none;}'
             . '.plu-lang-switcher.plu-ls-has-mobile-short .plu-ls-label-mobile{display:inline;}'
             . '}';

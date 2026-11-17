@@ -1504,7 +1504,7 @@
                     let flagPart = '';
                     if (showFlag) {
                         if (flagHtmlRaw) {
-                            flagPart = `<span class="plu-ls-flag" aria-hidden="true">${flagHtmlRaw}</span>`;
+                            flagPart = flagHtmlRaw;
                         } else {
                             flagPart = `<span class="plu-ls-flag plu-ls-flag-fallback" aria-hidden="true">&#127987;</span>`;
                         }
