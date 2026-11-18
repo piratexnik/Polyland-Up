@@ -602,7 +602,7 @@ final class SameSlug {
             // Получаем URL из стека вызовов url_to_postid
             $target_url = null;
             // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_debug_backtrace
-            $trace = debug_backtrace( DEBUG_BACKTRACE_PROVIDE_OBJECT, 5 );
+            $trace = debug_backtrace( 0, 6 );
             foreach ( $trace as $frame ) {
                 if ( isset( $frame['function'] ) && 'url_to_postid' === $frame['function'] && ! empty( $frame['args'][0] ) && is_string( $frame['args'][0] ) ) {
                     $target_url = $frame['args'][0];

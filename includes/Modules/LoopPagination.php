@@ -115,10 +115,6 @@ final class LoopPagination {
 		add_shortcode( 'scat_pagination', [ self::class, 'render_shortcode_pagination' ] );
 		add_shortcode( 'plu_read_more', [ self::class, 'render_shortcode_read_more' ] );
 
-		// Гарантированное раскрытие шорткодов внутри модулей и блоков Divi 5
-		add_filter( 'et_pb_module_content', [ self::class, 'process_divi_shortcodes' ], 20 );
-		add_filter( 'et_module_shortcode_output', [ self::class, 'process_divi_shortcodes' ], 20 );
-		add_filter( 'render_block', [ self::class, 'process_divi_shortcodes' ], 12 );
 	}
 
 	/**
@@ -834,28 +830,6 @@ final class LoopPagination {
 	}
 
 	/**
-	 * Гарантированное раскрытие шорткодов модуля в выводе Divi 5 / Theme Builder.
-	 *
-	 * @param mixed $output HTML-вывод модуля или блока.
-	 * @return mixed
-	 */
-	public static function process_divi_shortcodes( mixed $output ): mixed {
-		if ( ! is_string( $output ) || '' === $output ) {
-			return $output;
-		}
-
-		if (
-			str_contains( $output, '[plu_pagination' )
-			|| str_contains( $output, '[scat_pagination' )
-			|| str_contains( $output, '[plu_read_more' )
-		) {
-			return do_shortcode( $output );
-		}
-
-		return $output;
-	}
-
-	/**
 	 * Проверяет, выполняется ли рендер внутри Divi Visual Builder (фронтенд-билдер, AJAX или REST edit).
 	 *
 	 * @return bool
@@ -1066,7 +1040,12 @@ final class LoopPagination {
 		$prev_text   = self::get_ui_label( 'pagination_prev' );
 		$next_text   = self::get_ui_label( 'pagination_next' );
 		$status_tpl  = self::get_ui_label( 'pagination_status' );
-		$status_text = sprintf( $status_tpl, $current_page, $total_pages );
+		try {
+			$status_text = sprintf( $status_tpl, $current_page, $total_pages );
+		} catch ( \Throwable $e ) {
+			// Некорректный пользовательский шаблон (%-плейсхолдеры) не должен ронять фронтенд.
+			$status_text = $current_page . ' / ' . $total_pages;
+		}
 
 		if ( $is_preview ) {
 			$items_html = self::build_preview_items_html( $current_page, $total_pages, $show_arrows, $prev_text, $next_text );

@@ -5,8 +5,38 @@
     'use strict';
 
     const esc = function(str) {
-        return $('<div>').text(String(str || '')).html();
+        return $('<div>').text(null === str || undefined === str ? '' : String(str)).html();
     };
+
+    // Единый делегированный обработчик копирования шорткодов (все вкладки, регистрируется один раз).
+    $(document).on('click', '.plu-pg-copy-btn', function(e) {
+        e.preventDefault();
+        const $btn = $(this);
+        const textToCopy = String($btn.attr('data-copy-value') || '');
+        if (!textToCopy) {
+            return;
+        }
+
+        const markCopied = function() {
+            const origHtml = $btn.data('orig-html') || $btn.html();
+            $btn.data('orig-html', origHtml);
+            $btn.addClass('is-copied').text('✓ Скопировано!');
+            setTimeout(function() {
+                $btn.removeClass('is-copied').html(origHtml);
+            }, 1400);
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(textToCopy).then(markCopied).catch(function() {});
+        } else {
+            const $tmp = $('<textarea>').val(textToCopy).appendTo('body').select();
+            try {
+                document.execCommand('copy');
+                markCopied();
+            } catch (err) {}
+            $tmp.remove();
+        }
+    });
 
     $(document).ready(function() {
         // ============================================================
@@ -259,6 +289,7 @@
                     type: 'POST',
                     dataType: 'json',
                     data: ajaxData,
+                    timeout: 330000,
                     success: function(response) {
                         const $stepRow = $('#' + rowId);
 
@@ -781,36 +812,6 @@
             const $previewStatus = $('#plu-preview-pg-status');
             const $previewRmBtn = $('#plu-preview-rm-btn');
 
-            // Копирование шорткодов из шпаргалки в 1 клик (работает во всех вкладках)
-            $(document).on('click', '.plu-pg-copy-btn', function(e) {
-                e.preventDefault();
-                const $btn = $(this);
-                const textToCopy = String($btn.attr('data-copy-value') || '');
-                if (!textToCopy) {
-                    return;
-                }
-
-                const markCopied = function() {
-                    const origHtml = $btn.data('orig-html') || $btn.html();
-                    $btn.data('orig-html', origHtml);
-                    $btn.addClass('is-copied').text('✓ Скопировано!');
-                    setTimeout(function() {
-                        $btn.removeClass('is-copied').html(origHtml);
-                    }, 1400);
-                };
-
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(textToCopy).then(markCopied).catch(function() {});
-                } else {
-                    const $tmp = $('<textarea>').val(textToCopy).appendTo('body').select();
-                    try {
-                        document.execCommand('copy');
-                        markCopied();
-                    } catch (err) {}
-                    $tmp.remove();
-                }
-            });
-
             // Обновление CSS-переменных Live Preview в реальном времени
             $pgBox.on('input change', '.plu-pg-live-input', function() {
                 const cssVar = String($(this).attr('data-css-var') || '');
@@ -879,6 +880,7 @@
             let isBulkRunning = false;
             let stopRequested = false;
             let pauseTimer = null;
+            let pauseResume = null;
 
             const renderCategoryStatusBar = function(catInfo) {
                 if (!catInfo || !catInfo.cat_id) {
@@ -1232,6 +1234,7 @@
                     url: pluAdminData.ajax_url,
                     type: 'POST',
                     dataType: 'json',
+                    timeout: 330000, // защита от вечного зависания очереди при потере ответа
                     data: {
                         action: 'plu_bulk_process_post',
                         nonce: pluAdminData.nonce,
@@ -1319,9 +1322,12 @@
 
                         if (cfg.delaySec > 0) {
                             $progressLabel.html(`&#9201; Пауза ${esc(cfg.delaySec)} сек перед следующей статьей (${stepNum} из ${totalNum} готово)...`);
-                            pauseTimer = setTimeout(function() {
+                            pauseResume = function() {
+                                pauseTimer  = null;
+                                pauseResume = null;
                                 runBulkQueue(postIds, index + 1, cfg);
-                            }, cfg.delaySec * 1000);
+                            };
+                            pauseTimer = setTimeout(pauseResume, cfg.delaySec * 1000);
                         } else {
                             runBulkQueue(postIds, index + 1, cfg);
                         }
@@ -1377,6 +1383,10 @@
                 if (pauseTimer) {
                     clearTimeout(pauseTimer);
                     pauseTimer = null;
+                    // Остановка во время паузы: немедленно завершаем очередь, иначе кнопки останутся заблокированными.
+                    if (pauseResume) {
+                        pauseResume();
+                    }
                 }
                 $progressLabel.html('&#9208; Остановка после завершения текущего запроса...');
             });
@@ -1443,36 +1453,6 @@
             const $lsPreview = $('#plu-ls-live-preview');
             const $lsDesktopNav = $('#plu-ls-preview-desktop');
             const $lsMobileNav = $('#plu-ls-preview-mobile');
-
-            // Универсальный клик-копирование, если открыта вкладка menus (где нет $pgBox)
-            if (!$('#plu-pagination-admin-box').length) {
-                $lsBox.on('click', '.plu-pg-copy-btn', function(e) {
-                    e.preventDefault();
-                    const $btn = $(this);
-                    const textToCopy = String($btn.attr('data-copy-value') || '');
-                    if (!textToCopy) {
-                        return;
-                    }
-                    const markCopied = function() {
-                        const origHtml = $btn.data('orig-html') || $btn.html();
-                        $btn.data('orig-html', origHtml);
-                        $btn.addClass('is-copied').text('✓ Скопировано!');
-                        setTimeout(function() {
-                            $btn.removeClass('is-copied').html(origHtml);
-                        }, 1400);
-                    };
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        navigator.clipboard.writeText(textToCopy).then(markCopied).catch(function() {});
-                    } else {
-                        const $tmp = $('<textarea>').val(textToCopy).appendTo('body').select();
-                        try {
-                            document.execCommand('copy');
-                            markCopied();
-                        } catch (err) {}
-                        $tmp.remove();
-                    }
-                });
-            }
 
             const renderLangSwitcherPreview = function() {
                 const style = String($('#plu_ls_style').val() || 'classic');

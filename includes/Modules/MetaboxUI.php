@@ -287,7 +287,19 @@ final class MetaboxUI {
             $target_status = 'draft';
         }
 
+        // Защита от повышения привилегий: создание копий и публикация требуют соответствующих прав на тип записи.
+        $post_type_obj = get_post_type_object( $source_post->post_type );
+        if ( ! $post_type_obj instanceof \WP_Post_Type || ! current_user_can( $post_type_obj->cap->create_posts ) ) {
+            wp_send_json_error( [
+                'message' => esc_html__( 'У вас недостаточно прав для создания записей этого типа.', 'polyland-up' ),
+            ] );
+        }
+        if ( 'publish' === $target_status && ! current_user_can( $post_type_obj->cap->publish_posts ) ) {
+            $target_status = 'draft';
+        }
+
         $options = [
+            'enforce_caps'       => true,
             'mode'               => $mode,
             'keep_same_slug'     => ! empty( $_POST['keep_same_slug'] ),
             'rewrite_links'      => ! empty( $_POST['rewrite_links'] ),
@@ -395,6 +407,10 @@ final class MetaboxUI {
                     $existing_id
                 )
             );
+        }
+
+        if ( $existing_id > 0 && ! empty( $options['enforce_caps'] ) && ! current_user_can( 'edit_post', $existing_id ) ) {
+            return new \WP_Error( 'plu_forbidden_overwrite', __( 'Недостаточно прав для перезаписи существующего перевода.', 'polyland-up' ) );
         }
 
         $is_update = $existing_id > 0;

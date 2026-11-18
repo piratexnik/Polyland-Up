@@ -26,31 +26,12 @@ final class MenuDuplicator {
         // Фронтенд и Divi Builder: шорткод переключателя языков [plu_lang_switcher]
         add_shortcode( 'plu_lang_switcher', [ self::class, 'render_shortcode_lang_switcher' ] );
 
-        // Гарантированное раскрытие шорткода внутри модулей и блоков Divi 5
-        add_filter( 'et_pb_module_content', [ self::class, 'process_divi_shortcodes' ], 20 );
-        add_filter( 'et_module_shortcode_output', [ self::class, 'process_divi_shortcodes' ], 20 );
-        add_filter( 'render_block', [ self::class, 'process_divi_shortcodes' ], 12 );
-
         if ( ! is_admin() ) {
             return;
         }
 
         add_action( 'wp_ajax_plu_duplicate_menu', [ self::class, 'ajax_duplicate_menu' ] );
         add_action( 'admin_notices', [ self::class, 'render_nav_menus_notice' ] );
-    }
-
-    /**
-     * Раскрывает шорткод [plu_lang_switcher] внутри модулей и блоков Divi 5.
-     *
-     * @param mixed $content HTML-содержимое модуля или блока.
-     * @return mixed
-     */
-    public static function process_divi_shortcodes( mixed $content ): mixed {
-        if ( ! is_string( $content ) || ! str_contains( $content, '[plu_lang_switcher' ) ) {
-            return $content;
-        }
-
-        return do_shortcode( $content );
     }
 
     /**

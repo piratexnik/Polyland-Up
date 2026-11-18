@@ -148,19 +148,23 @@ final class Updater {
 
         $token = trim( (string) plu_get_option( 'github_token', '' ) );
         if ( '' === $token ) {
-            if ( isset( $args['headers']['Authorization'] ) ) {
-                unset( $args['headers']['Authorization'] );
-            }
             return $args;
         }
 
+        // Строгая проверка хоста и пути (а не подстроки), чтобы токен не утекал на сторонние URL.
+        $parts = wp_parse_url( $url );
+        $host  = is_array( $parts ) ? strtolower( (string) ( $parts['host'] ?? '' ) ) : '';
+        $path  = is_array( $parts ) ? (string) ( $parts['path'] ?? '' ) : '';
+        $repo  = '/' . strtolower( self::REPO_FULL ) . '/';
+        $lpath = strtolower( $path );
+
         $is_repo_request = false;
-        if (
-            stripos( $url, 'api.github.com/repos/' . self::REPO_FULL ) !== false ||
-            stripos( $url, 'github.com/' . self::REPO_FULL ) !== false ||
-            stripos( $url, 'raw.githubusercontent.com/' . self::REPO_FULL ) !== false
-        ) {
-            $is_repo_request = true;
+        if ( isset( $parts['scheme'] ) && 'https' === $parts['scheme'] ) {
+            if ( 'api.github.com' === $host && str_starts_with( $lpath, '/repos' . rtrim( $repo, '/' ) . '/' ) ) {
+                $is_repo_request = true;
+            } elseif ( in_array( $host, [ 'github.com', 'raw.githubusercontent.com' ], true ) && str_starts_with( $lpath, $repo ) ) {
+                $is_repo_request = true;
+            }
         }
 
         if ( $is_repo_request ) {
@@ -169,7 +173,7 @@ final class Updater {
             }
             $args['headers']['Authorization'] = 'token ' . $token;
 
-            if ( stripos( $url, 'api.github.com' ) !== false ) {
+            if ( 'api.github.com' === $host ) {
                 $args['headers']['Accept'] = 'application/vnd.github+json';
             }
         }
@@ -286,8 +290,9 @@ final class Updater {
         $is_our_plugin = false;
         if ( is_array( $hook_extra ) && isset( $hook_extra['plugin'] ) && $hook_extra['plugin'] === PLU_BASENAME ) {
             $is_our_plugin = true;
-        } elseif ( stripos( $source, self::PLUGIN_SLUG ) !== false ) {
-            $is_our_plugin = true;
+        } elseif ( ! is_array( $hook_extra ) || ! isset( $hook_extra['plugin'] ) ) {
+            // hook_extra не передан: определяем по имени распакованной папки (GitHub: owner-repo-hash).
+            $is_our_plugin = false !== stripos( basename( untrailingslashit( $source ) ), self::REPO_NAME );
         }
 
         if ( ! $is_our_plugin || ! is_object( $wp_filesystem ) ) {

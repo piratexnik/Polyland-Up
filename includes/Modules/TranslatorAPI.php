@@ -104,7 +104,8 @@ final class TranslatorAPI {
      * @return string ISO-код языка.
      */
     public static function normalize_lang_code( string $slug ): string {
-        $clean = strtolower( trim( $slug ) );
+        // Только [a-z0-9_-]: код попадает в URL внешних API-запросов (защита от инъекции параметров).
+        $clean = strtolower( (string) preg_replace( '/[^A-Za-z0-9_-]/', '', trim( $slug ) ) );
 
         $direct_map = [
             'ua'    => 'uk',

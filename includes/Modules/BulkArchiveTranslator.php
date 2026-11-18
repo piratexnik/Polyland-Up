@@ -1118,7 +1118,8 @@ final class BulkArchiveTranslator {
 		check_ajax_referer( 'plu_admin_nonce', 'nonce' );
 
 		$post_id = isset( $_POST['post_id'] ) ? absint( wp_unslash( $_POST['post_id'] ) ) : 0;
-		if ( $post_id <= 0 || ! current_user_can( 'edit_post', $post_id ) ) {
+		// Пакетный перевод тратит квоты API: доступ только администраторам (как и вкладка), плюс право на правку записи.
+		if ( $post_id <= 0 || ! current_user_can( 'manage_options' ) || ! current_user_can( 'edit_post', $post_id ) ) {
 			wp_send_json_error( [ 'message' => __( 'Недостаточно прав или некорректный ID записи.', 'polyland-up' ) ] );
 		}
 

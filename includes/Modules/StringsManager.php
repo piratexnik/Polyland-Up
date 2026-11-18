@@ -183,7 +183,10 @@ final class StringsManager {
 
 		if ( false === $raw || ! is_array( $raw ) ) {
 			$defaults = self::get_default_presets();
-			update_option( self::OPTION_NAME, $defaults, true );
+			// Запись в БД только в админке: на фронтенде (page cache, высокий RPS) пресеты отдаются из памяти без INSERT.
+			if ( is_admin() ) {
+				update_option( self::OPTION_NAME, $defaults, true );
+			}
 			self::$strings_cache = $defaults;
 
 			return self::$strings_cache;
@@ -343,7 +346,8 @@ final class StringsManager {
 	 * Регистрация всех UI-строк в нативном реестре Polylang (Мови -> Переклади).
 	 */
 	public static function register_polylang_strings(): void {
-		if ( ! function_exists( 'pll_register_string' ) ) {
+		// Реестр строк Polylang нужен только экрану «Переклады» в админке.
+		if ( ! is_admin() || ! function_exists( 'pll_register_string' ) ) {
 			return;
 		}
 
@@ -424,13 +428,13 @@ final class StringsManager {
 	}
 
 	/**
-	 * Гарантированное раскрытие шорткодов [plu_str] и [plu_date] в модулях Divi.
+	 * Единый фильтр раскрытия шорткодов плагина ([plu_*], [scat_pagination]) в модулях Divi.
 	 *
 	 * @param mixed $output HTML-вывод модуля.
 	 * @return mixed
 	 */
 	public static function process_divi_shortcodes( mixed $output ): mixed {
-		if ( ! is_string( $output ) || ! str_contains( $output, '[plu_' ) ) {
+		if ( ! is_string( $output ) || ( ! str_contains( $output, '[plu_' ) && ! str_contains( $output, '[scat_pagination' ) ) ) {
 			return $output;
 		}
 
@@ -470,7 +474,7 @@ final class StringsManager {
 			}
 		}
 
-		if ( str_contains( $block_content, '[plu_' ) ) {
+		if ( str_contains( $block_content, '[plu_' ) || str_contains( $block_content, '[scat_pagination' ) ) {
 			$block_content = do_shortcode( $block_content );
 		}
 

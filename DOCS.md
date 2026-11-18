@@ -1,5 +1,7 @@
 # Технический паспорт: Polylang Divi 5 AI Auto-Translator & Same Slug
 
+> Единственный источник истины для продолжения разработки в новой сессии. Версия документа соответствует релизу `v4.2` (стабилизационный аудит безопасности и производительности).
+
 ## 1. Общие сведения
 - **Название:** Polylang Divi 5 AI Auto-Translator & Same Slug
 - **Slug плагина:** `Polyland-Up`
@@ -7,7 +9,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `4.1`
+- **Текущая версия:** `4.2`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -43,7 +45,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '4.1'
+- `PLU_VERSION` — '4.2'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -78,7 +80,7 @@ plu_get_option( string $key, mixed $default = '' ): mixed
    - При сбое сети или HTTP-ошибке создается маркер ошибки `plu_github_update_error` на 10 минут, предотвращая торможение админки.
 3. **Пакет скачивания:**
    - Публичный репозиторий: архив релизного тега `.../archive/refs/tags/v{remote_version}.zip`.
-   - Приватный репозиторий: API zipball `api.github.com/repos/piratexnik/Polyland-Up/zipball/v{remote_version}` с передачей `Authorization: token {token}` и `Accept: application/vnd.github+json` через фильтр `http_request_args`.
+   - Приватный репозиторий: API zipball `api.github.com/repos/piratexnik/Polyland-Up/zipball/v{remote_version}` с передачей `Authorization: token {token}` и `Accept: application/vnd.github+json` через фильтр `http_request_args`. **Токен добавляется только при строгом совпадении схемы `https`, хоста (`api.github.com` / `github.com` / `raw.githubusercontent.com`) и начала пути (`/repos/piratexnik/Polyland-Up/`, `/piratexnik/Polyland-Up/`)** — проверка выполняется через `wp_parse_url()`, а не по подстроке; чужие заголовки `Authorization` фильтр никогда не удаляет.
 4. **Фильтры WordPress:**
    - `pre_set_site_transient_update_plugins`: сохраняет чужие ключи в `checked`, проверяет версию и наполняет `response` или `no_update`.
    - `site_transient_update_plugins`: мгновенное снятие бейджа обновления на чтении без HTTP-запросов, если версия на диске `>=` удаленной.
@@ -244,10 +246,10 @@ if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() )
 Модуль позволяет использовать единый шаблон Divi 5 Theme Builder (архивы, циклы Loop, шапка, подвал, 404) для всех языков Polylang без дублирования шаблонов:
 1. **Хранение и кеширование:**
    - Словарь хранится в опции `plu_ui_strings` (autoload) со статическим кешем в памяти (`$strings_cache`) — **0 дополнительных запросов к БД** в циклах.
-   - При первой инициализации предзаполняются 10 базовых ключей (`read_more`, `home`, `published_on`, `updated_on`, `all_news`, `back_to_list`, `search_placeholder`, `no_results`, `share`, `categories`).
-   - Все строки синхронизируются с нативным реестром Polylang (`pll_register_string(..., 'Polylang AI UI')` на хуке `init`).
+   - При первой инициализации (если опция отсутствует) предзаполняются 10 базовых ключей (`read_more`, `home`, `published_on`, `updated_on`, `all_news`, `back_to_list`, `search_placeholder`, `no_results`, `share`, `categories`).
+   - Все строки синхронизируются с нативным реестром Polylang (`pll_register_string(..., 'Polylang AI UI')` на хуке `init`, **только в админке** — на фронтенде реестр Polylang не нужен).
 2. **Три способа вывода:**
-   - Шорткод `[plu_str id="read_more" before="" after="" default=""]` (с гарантированным раскрытием через `render_block` с приоритетом 12, `et_pb_module_content`, `et_module_shortcode_output`).
+   - Шорткод `[plu_str id="read_more" before="" after="" default=""]` (с гарантированным раскрытием единым фильтром `StringsManager::process_divi_shortcodes()` / `process_divi_block_output()` — `render_block` (приоритет 12), `et_pb_module_content`, `et_module_shortcode_output`; обслуживает все шорткоды `[plu_*]` и `[scat_pagination]`, включая `[plu_lang_switcher]`, `[plu_pagination]`, `[plu_read_more]`).
    - Виртуальные мета-ключи `plu_str_{id}` через фильтр `get_post_metadata` для `Dynamic Content -> Custom Field` в Divi 5 (работает независимо от `$object_id`, включая `0`/`null` на страницах Архивов / Категорий / Поиска, а также с фоллбэком в `render_block` для нераскрытых плейсхолдеров `$variable(...plu_str_...)$`).
    - Бонусный шорткод мультиязычной даты `[plu_date format="l, j F Y"]` через `wp_date()`.
 3. **Интерфейс админки (`admin.php?page=polylang-up&tab=strings`):**
@@ -304,3 +306,130 @@ if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() )
    - Если пересортицы нет — переводит только отсутствующие, пустые или содержащие чужой язык посты (в режиме `smart`) либо все выбранные языки (`force_all`).
    - Очищает URL-слаги (`SameSlug::normalize_clean_slug()`), синхронизирует языковые рубрики (`pll_get_term`) и жестко сохраняет историческую дату публикации оригинала (`post_date`, `post_date_gmt`, `'edit_date' => true`).
    - Клиентская очередь в `assets/js/admin.js` поддерживает ограничитель пачки (`session_limit`: 5, 10, 20, 50, Все), регулируемую паузу между статьями (`delay_sec`: 0, 2, 4, 6 сек), кнопку «⏸ Пауза / Стоп», живое обновление строк таблицы, автоматическое/ручное скрытие выполненных (`✅`) строк с динамическим пересчётом счётчиков и кнопку очистки лога.
+
+---
+
+## 16. Хуки WordPress (полная карта)
+| Хук | Тип | Колбэк | Контекст |
+| :--- | :--- | :--- | :--- |
+| `plugins_loaded` | action | `Init::init()` (через замыкание в `Polyland-Up.php`) | всегда |
+| `update_option_plu_settings` | action | сброс кеша `plu_get_option()` | всегда |
+| `admin_menu`, `admin_init`, `admin_enqueue_scripts`, `plugin_action_links_{basename}` | action/filter | `Settings` | admin / cron / CLI |
+| `wp_ajax_plu_test_api`, `wp_ajax_plu_fetch_gemini_models` | AJAX | `Settings::ajax_*` (nonce `plu_admin_nonce`, `manage_options`) | admin |
+| `pre_set_site_transient_update_plugins`, `site_transient_update_plugins`, `plugins_api`, `upgrader_source_selection`, `http_request_args` | filter | `Updater` | admin / cron / CLI |
+| `plugin_row_meta`, `admin_init` (`handle_force_check`), `admin_notices` | filter/action | `Updater` | только `is_admin()` |
+| `add_meta_boxes`, `wp_ajax_plu_duplicate_post` | action | `MetaboxUI` (nonce `plu_clone_nonce`, `edit_post` + `create_posts` + `publish_posts`) | admin |
+| `wp_ajax_plu_bulk_scan_category`, `wp_ajax_plu_bulk_fix_category_terms`, `wp_ajax_plu_bulk_process_post` | AJAX | `BulkArchiveTranslator` (nonce `plu_admin_nonce`, `manage_options`) | admin / CLI |
+| `wp_unique_post_slug` (10, 6 арг.), `request` (10), `url_to_postid` (20), `pll_check_canonical_url`, `redirect_canonical` | filter | `SameSlug` (только если `pll_languages_list` и `enable_same_slug`) | **фронтенд + админка** |
+| `init` (20) → `register_polylang_strings` | action | `StringsManager` | только `is_admin()` внутри метода |
+| `et_pb_module_content` (20), `et_module_shortcode_output` (20), `render_block` (12) | filter | `StringsManager::process_divi_shortcodes` / `process_divi_block_output` — единственная точка раскрытия шорткодов плагина | фронтенд |
+| `get_post_metadata` (10, 4 арг.) | filter | `StringsManager::filter_virtual_post_metadata` (виртуальные ключи `plu_str_{id}`) | фронтенд |
+| `update_option_plu_ui_strings` | action | `StringsManager::reset_cache` | всегда |
+| `wp_ajax_plu_save_ui_strings`, `wp_ajax_plu_translate_ui_strings` | AJAX | `StringsManager` (nonce, `manage_options`) | admin |
+| `pre_render_block` (5), `render_block` (999) | filter | `LoopPagination::track_loop_block_start/end` (стек Loop-блоков) | фронтенд |
+| `pre_get_posts` (20), `the_posts` (10, 2 арг.) | action/filter | `LoopPagination::sync_main_query_posts_per_page`, `capture_loop_query_stats` | фронтенд (в админке выходят сразу) |
+| `admin_notices`, `wp_ajax_plu_duplicate_menu` | action | `MenuDuplicator` (nonce `plu_admin_nonce`, `edit_theme_options`/`manage_options`) | admin |
+
+Все колбэки фильтров принимают `mixed` и сами приводят/проверяют типы (`declare(strict_types=1)` не вызывает `TypeError` при `null`/`false`/числовой строке от сторонних плагинов).
+
+## 17. Шорткоды
+| Шорткод | Класс::метод | Атрибуты |
+| :--- | :--- | :--- |
+| `[plu_str]` | `StringsManager::render_shortcode_str` | `id`, `before`, `after`, `default` (вывод — `esc_html`) |
+| `[plu_date]` | `StringsManager::render_shortcode_date` | `format` (вывод — `esc_html( wp_date() )`) |
+| `[plu_pagination]`, `[scat_pagination]` | `LoopPagination::render_shortcode_pagination` | `per_page`, `mid_size`, `end_size`, `show_arrows`, `show_status`, `align` |
+| `[plu_read_more]` | `LoopPagination::render_shortcode_read_more` | `id`, `text`, `icon`, `class` (`esc_url`/`esc_attr`/`esc_html`/`sanitize_html_class`) |
+| `[plu_lang_switcher]` | `MenuDuplicator::render_shortcode_lang_switcher` | `style` (`classic`/`pills`/`minimal`, `inline`→`classic`), `show_mobile_short`, `hide_current`, `separator`, `class` |
+
+Шаблон статуса пагинации (`pagination_status`) пользовательский: `sprintf` обёрнут в `try/catch (\Throwable)` — битый шаблон не роняет страницу.
+
+## 18. Опции, транзиенты и хранилище
+| Имя | Тип | Описание |
+| :--- | :--- | :--- |
+| `plu_settings` | option (autoload) | Все настройки (см. разд. 3 + ключи `pg_*`, `rm_style`, `ls_*`, `show_flag_{slug}`, `custom_label_{slug}`, `mobile_label_{slug}`, `protected_terms`). Содержит `gemini_api_key` и `github_token` — **никогда не передаются в JS** (`wp_localize_script` отдаёт только nonce'ы, `ajax_url`, i18n и дефолтный промпт). |
+| `plu_ui_strings` | option (autoload) | Словарь UI-строк `[id => [lang => text]]`; пресеты пишутся в БД только из админки. |
+| `plu_github_update_check` | transient 12ч | Удалённая версия. |
+| `plu_github_update_error` | transient 10 мин | Диагностика сбоя GitHub (антиспам запросов). |
+| `polylang` (чужая опция) | option | `MenuDuplicator` дописывает `nav_menus[theme][lang]`. |
+| Мета `plu_str_{id}` | виртуальная | Не хранится: подменяется в `get_post_metadata`. |
+
+Nonce-действия: `plu_admin_nonce` (Settings/Strings/Menu/Bulk), `plu_clone_nonce` (метабокс), `plu_force_check_update` (Updater).
+
+## 19. Карта классов и методов (сгенерировано из кода v4.2)
+### `Polyland-Up.php`
+- **public:** `plu_get_option`, `plu_is_translator_ready`, `plu_translate_dictionary`, `plu_get_translator_last_stats`
+- **private:** —
+
+### `includes/Core/Init.php`
+- **public:** `init`
+- **private:** —
+
+### `includes/Core/Settings.php`
+- **public:** `get_default`, `get_protected_terms`, `init`, `add_action_links`, `register_menu`, `enqueue_assets`, `register_settings`, `sanitize`, `render_slug_section_intro`, `render_ai_section_intro`, `render_updater_section_intro`, `render_field_enable_same_slug`, `render_field_default_translator`, `render_field_gemini_api_key`, `render_field_gemini_model`, `render_field_system_prompt`, `render_field_protected_terms`, `render_field_api_test`, `render_field_github_token`, `ajax_test_api`, `translate_free_cascade`, `ajax_fetch_gemini_models`, `render_page`
+- **private:** `extract_free_channel_translation`, `test_gtx_api`, `test_gemini_api`
+
+### `includes/Core/Updater.php`
+- **public:** `init`, `get_local_version`, `get_remote_version`, `get_download_package`, `authorize_download_request`, `check_update`, `filter_update_plugins_read`, `fix_source_directory`, `plugin_info`, `add_row_meta`, `handle_force_check`, `render_admin_notices`
+- **private:** —
+
+### `includes/Modules/BulkArchiveTranslator.php`
+- **public:** `init`, `detect_real_text_language`, `is_lang_compatible_with_detected`, `get_active_languages`, `render_tab_content`, `inspect_category_translations`, `ajax_scan_category`, `scan_archive_items`, `find_slug_siblings_by_clean_slug`, `build_post_audit_row`, `ajax_fix_category_terms`, `fix_missing_category_translations`, `ajax_process_post`, `process_single_post_group`
+- **private:** `get_available_years`
+
+### `includes/Modules/DiviParser.php`
+- **public:** `translate_post_data`, `extract_post_dictionary`, `apply_translated_dictionary`, `localize_migrated_galleries_in_content`, `localize_migrated_gallery`, `is_translatable_string`
+- **private:** `extract_blocks_recursive`, `walk_divi_attrs`, `should_inspect_attr_leaf`, `apply_blocks_recursive`, `set_value_by_path`, `extract_rich_string`, `apply_rich_string`, `extract_shortcode_segments`, `extract_shortcode_tag_attrs`, `rebuild_shortcode_tag`, `extract_html_segments`, `split_protected_html_blocks`, `find_next_migrated_gallery_pos`, `find_closing_div_end`, `set_html_tag_attribute`, `extract_granular_html_segments`, `extract_html_tag_attrs`, `rebuild_html_tag_attrs`, `extract_single_html_chunk`, `apply_html_chunk`, `register_text`, `sanitize_utf8`, `sanitize_blocks_utf8`
+
+### `includes/Modules/LinkRewriter.php`
+- **public:** `get_last_rewritten_count`, `rewrite_content`, `rewrite_url`, `is_rewritable_internal_url`
+- **private:** `rewrite_blocks_recursive`, `rewrite_attrs_recursive`, `is_media_context_path`, `rewrite_html_and_shortcodes`, `is_dynamic_divi_value`, `resolve_linked_post_id`, `switch_language_prefix`, `build_absolute_url`, `to_relative_url`, `get_home_base_path`, `strip_home_base_path`
+
+### `includes/Modules/LoopPagination.php`
+- **public:** `init`, `get_defaults`, `track_loop_block_start`, `track_loop_block_end`, `get_current_page`, `sync_main_query_posts_per_page`, `capture_loop_query_stats`, `detect_divi_loop_per_page`, `extract_per_page_from_content`, `render_shortcode_pagination`, `render_shortcode_read_more`, `render_tab_content`
+- **private:** `get_active_loop_context`, `is_only_system_post_types`, `is_divi_loop_secondary_query`, `resolve_active_body_layout_id`, `matches_theme_builder_rules`, `find_per_page_in_blocks`, `is_divi5_loop_enabled`, `find_per_page_in_attrs`, `extract_positive_int`, `find_offset_in_attrs`, `extract_non_negative_int`, `is_builder_preview`, `get_ui_label`, `count_archive_found_posts`, `build_preview_items_html`, `render_inline_styles_once`
+
+### `includes/Modules/MenuDuplicator.php`
+- **public:** `init`, `render_nav_menus_notice`, `render_tab_content`, `get_lang_switcher_defaults`, `render_shortcode_lang_switcher`, `build_flag_html`, `ajax_duplicate_menu`, `duplicate_menu_to_language`, `assign_menu_to_polylang_locations`
+- **private:** `render_lang_switcher_card`, `render_ls_inline_styles_once`
+
+### `includes/Modules/MetaboxUI.php`
+- **public:** `init`, `register_metabox`, `render_metabox`, `ajax_duplicate_post`, `duplicate_post_to_language`, `self_translate_source_post`, `copy_post_meta`, `copy_post_taxonomies`
+- **private:** `render_unready_notice`, `format_translated_blocks_count`
+
+### `includes/Modules/SameSlug.php`
+- **public:** `init`, `get_target_post_language`, `get_language_term_taxonomy_id`, `filter_unique_post_slug`, `normalize_clean_slug`, `resolve_post_by_path_and_lang`, `detect_request_language`, `filter_request`, `filter_url_to_postid`, `filter_pll_canonical_url`, `filter_redirect_canonical`
+- **private:** `is_slug_taken_in_language`
+
+### `includes/Modules/StringsManager.php`
+- **public:** `init`, `reset_cache`, `get_default_presets`, `get_strings`, `get_polylang_slugs`, `get_polylang_languages`, `get_current_lang_slug`, `get_string`, `register_polylang_strings`, `render_shortcode_str`, `render_shortcode_date`, `process_divi_shortcodes`, `process_divi_block_output`, `filter_virtual_post_metadata`, `sanitize_string_id`, `render_tab_content`, `ajax_save_ui_strings`, `ajax_translate_ui_strings`
+- **private:** —
+
+### `includes/Modules/TranslatorAPI.php`
+- **public:** `get_last_stats`, `translate`, `normalize_lang_code`, `translate_via_gtx`, `protect_special_tokens`, `restore_special_tokens`, `translate_via_gemini`, `decode_gemini_json`
+- **private:** `request_google_batch`
+
+
+### Ключевые статические свойства
+- `SameSlug::$forced_lang` — программный язык при вставке поста (всегда сбрасывать в `finally`); `SameSlug::$in_url_to_postid` — защита от рекурсии.
+- `LoopPagination::$in_divi_loop_block`, `$last_loop_found_posts`, `$last_loop_per_page`, приватные `$block_stack`, `$archive_count_cache`, `$per_page_cache`.
+- `TranslatorAPI::$last_stats` — статистика последнего вызова (`get_last_stats()`).
+- `StringsManager::$strings_cache` — кеш словаря в RAM (`reset_cache()`).
+
+## 20. Аудит v4.2: что исправлено (журнал для преемственности)
+**Безопасность**
+1. `Updater::authorize_download_request`: токен GitHub добавлялся при совпадении *подстроки* в любом URL (утечка токена на сторонний хост через `?x=github.com/piratexnik/Polyland-Up`) и **снимались чужие `Authorization`-заголовки у всех HTTP-запросов сайта** при пустом токене. Теперь строгая проверка https + хост + префикс пути, чужие заголовки не затрагиваются.
+2. `Updater::fix_source_directory`: определение «наш плагин» по подстроке в пути могло перехватить чужие обновления; теперь при наличии `hook_extra['plugin']` решает только он, иначе — имя папки.
+3. `MetaboxUI::ajax_duplicate_post`: повышение привилегий (достаточно `edit_post`: можно создать/опубликовать копии и перезаписать чужие переводы). Добавлены проверки `cap->create_posts`, `cap->publish_posts` (иначе принудительно `draft`) и `edit_post` на перезаписываемый перевод (`enforce_caps`).
+4. `BulkArchiveTranslator::ajax_process_post`: расход квот API редакторами — теперь только `manage_options` + `edit_post`.
+5. `TranslatorAPI::normalize_lang_code`: код языка попадал в URL внешних API без очистки (публичный `plu_translate_dictionary()`); теперь только `[A-Za-z0-9_-]`.
+**Производительность / фронтенд**
+6. `StringsManager`: запись пресетов в `wp_options` с фронтенда и `pll_register_string` на каждом хите — ограничено админкой.
+7. Удалены три дублирующих набора фильтров `et_pb_module_content`/`et_module_shortcode_output`/`render_block` в `LoopPagination` и `MenuDuplicator` (единая точка в `StringsManager`).
+8. `SameSlug::filter_url_to_postid`: `debug_backtrace()` без `PROVIDE_OBJECT`, глубина 6.
+**Надёжность**
+9. `LoopPagination`: `sprintf` с пользовательским шаблоном статуса обёрнут в `try/catch`.
+10. `admin.js`: остановка очереди во время паузы оставляла кнопки заблокированными (`pauseResume`); добавлен `timeout` (330 с) на долгие AJAX (`plu_bulk_process_post`, `plu_duplicate_post`); `esc()` больше не превращает `0` в пустую строку; три дубля обработчика копирования шорткодов заменены одним делегированным.
+**Известные ограничения / идеи**
+- `plu_settings` автозагружается вместе с ключами API (нужен фронтенду для `enable_same_slug`/дизайна) — при необходимости вынести секреты в отдельную опцию с `autoload=false`.
+- Gemini при невалидном JSON возвращает оригиналы без ошибки (счётчик `translated_count` может быть завышен).
+- Модуль `SameSlug::filter_request` делает по одному SQL на сегмент пути на каждой уникальной странице — защищён page-cache'ем; при необходимости добавить object-cache.
