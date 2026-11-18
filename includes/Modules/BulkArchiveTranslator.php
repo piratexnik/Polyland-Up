@@ -100,8 +100,23 @@ final class BulkArchiveTranslator {
 
 		$cyr_count   = (int) preg_match_all( '/\p{Cyrillic}/u', $clean_no_brands );
 		$latin_count = (int) preg_match_all( '/[a-zA-Z]/', $clean_no_brands );
+		$total_alpha = $latin_count + $cyr_count;
 
-		// Если в тексте есть ХОТЯ БЫ ОДНА кириллическая буква — он НИКОГДА не считается английским ('en')
+		// Если латинских букв явно большинство — единичные кириллические артикулы/аббревиатуры (ДСТУ, УкрСЕПРО, СММ-18) не мешают распознать EN
+		if ( $latin_count >= 15 && $total_alpha > 0 && ( $latin_count / $total_alpha ) >= 0.70 ) {
+			return 'en';
+		}
+
+		$clean_title = (string) preg_replace( '/\s+/u', ' ', trim( wp_strip_all_tags( html_entity_decode( $title, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) ) );
+		if ( '' !== $clean_title ) {
+			$t_lat   = (int) preg_match_all( '/[a-zA-Z]/', $clean_title );
+			$t_cyr   = (int) preg_match_all( '/\p{Cyrillic}/u', $clean_title );
+			$t_total = $t_lat + $t_cyr;
+			if ( $t_lat >= 6 && $t_total > 0 && ( $t_lat / $t_total ) > 0.60 && ( 0 === $total_alpha || ( $latin_count / $total_alpha ) >= 0.50 ) ) {
+				return 'en';
+			}
+		}
+
 		if ( $cyr_count > 0 ) {
 			// Подсчет уникальных украинских и русских маркеров
 			$uk_unique_chars = (int) preg_match_all( '/[іїєґІЇЄҐ]/u', $clean_no_brands );
@@ -940,7 +955,7 @@ final class BulkArchiveTranslator {
 
 		$has_unlinked = ! empty( $unlinked_matches );
 		$is_complete  = ( ! $has_mismatch && 0 === $missing_langs && 0 === $empty_langs && ! $has_unlinked );
-		$needs_action = ! $is_complete || $slug_dirty;
+		$needs_action = ! $is_complete;
 
 		return [
 			'post_id'          => (int) $post->ID,
