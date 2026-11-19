@@ -1,6 +1,6 @@
 # Технический паспорт: Polylang Divi 5 AI Auto-Translator & Same Slug
 
-> Единственный источник истины для продолжения разработки в новой сессии. Версия документа соответствует релизу `v4.2` (стабилизационный аудит безопасности и производительности).
+> Единственный источник истины для продолжения разработки в новой сессии. Версия документа соответствует релизу `v4.3` (предустановленные UI-строки ссылок подвала с неразрушающим слиянием).
 
 ## 1. Общие сведения
 - **Название:** Polylang Divi 5 AI Auto-Translator & Same Slug
@@ -9,7 +9,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `4.2`
+- **Текущая версия:** `4.3`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -45,7 +45,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '4.2'
+- `PLU_VERSION` — '4.3'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -348,6 +348,7 @@ if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() )
 | :--- | :--- | :--- |
 | `plu_settings` | option (autoload) | Все настройки (см. разд. 3 + ключи `pg_*`, `rm_style`, `ls_*`, `show_flag_{slug}`, `custom_label_{slug}`, `mobile_label_{slug}`, `protected_terms`). Содержит `gemini_api_key` и `github_token` — **никогда не передаются в JS** (`wp_localize_script` отдаёт только nonce'ы, `ajax_url`, i18n и дефолтный промпт). |
 | `plu_ui_strings` | option (autoload) | Словарь UI-строк `[id => [lang => text]]`; пресеты пишутся в БД только из админки. |
+| `plu_ui_footer_links_seeded` | option (autoload) | Флаг однократного неразрушающего сидирования 4 предустановленных строк подвала (`privacy_text`, `privacy_url`, `service_text`, `service_url`). |
 | `plu_github_update_check` | transient 12ч | Удалённая версия. |
 | `plu_github_update_error` | transient 10 мин | Диагностика сбоя GitHub (антиспам запросов). |
 | `polylang` (чужая опция) | option | `MenuDuplicator` дописывает `nav_menus[theme][lang]`. |
@@ -355,7 +356,7 @@ if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() )
 
 Nonce-действия: `plu_admin_nonce` (Settings/Strings/Menu/Bulk), `plu_clone_nonce` (метабокс), `plu_force_check_update` (Updater).
 
-## 19. Карта классов и методов (сгенерировано из кода v4.2)
+## 19. Карта классов и методов (сгенерировано из кода v4.3)
 ### `Polyland-Up.php`
 - **public:** `plu_get_option`, `plu_is_translator_ready`, `plu_translate_dictionary`, `plu_get_translator_last_stats`
 - **private:** —
@@ -402,7 +403,7 @@ Nonce-действия: `plu_admin_nonce` (Settings/Strings/Menu/Bulk), `plu_clo
 
 ### `includes/Modules/StringsManager.php`
 - **public:** `init`, `reset_cache`, `get_default_presets`, `get_strings`, `get_polylang_slugs`, `get_polylang_languages`, `get_current_lang_slug`, `get_string`, `register_polylang_strings`, `render_shortcode_str`, `render_shortcode_date`, `process_divi_shortcodes`, `process_divi_block_output`, `filter_virtual_post_metadata`, `sanitize_string_id`, `render_tab_content`, `ajax_save_ui_strings`, `ajax_translate_ui_strings`
-- **private:** —
+- **private:** `expand_encoded_plu_str_in_html`
 
 ### `includes/Modules/TranslatorAPI.php`
 - **public:** `get_last_stats`, `translate`, `normalize_lang_code`, `translate_via_gtx`, `protect_special_tokens`, `restore_special_tokens`, `translate_via_gemini`, `decode_gemini_json`

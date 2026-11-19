@@ -16,9 +16,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class StringsManager {
 
-	public const OPTION_NAME = 'plu_ui_strings';
-	public const PLL_GROUP   = 'Polylang AI UI';
-	public const META_PREFIX = 'plu_str_';
+	public const OPTION_NAME        = 'plu_ui_strings';
+	public const SEED_FOOTER_OPTION = 'plu_ui_footer_links_seeded';
+	public const PLL_GROUP          = 'Polylang AI UI';
+	public const META_PREFIX        = 'plu_str_';
 
 	/**
 	 * Статический кеш словаря UI-строк в RAM.
@@ -135,6 +136,26 @@ final class StringsManager {
 				'en' => 'Page %1$d of %2$d',
 				'ru' => 'Страница %1$d из %2$d',
 			],
+			'privacy_text' => [
+				'uk' => 'Політика конфіденційності',
+				'en' => 'Privacy Policy',
+				'ru' => 'Политика конфиденциальности',
+			],
+			'privacy_url' => [
+				'uk' => '/privacy-policy/',
+				'en' => '/en/privacy-policy/',
+				'ru' => '/ru/privacy-policy/',
+			],
+			'service_text' => [
+				'uk' => 'Сервісні центри',
+				'en' => 'Service Centers',
+				'ru' => 'Сервисные центры',
+			],
+			'service_url' => [
+				'uk' => '/service/',
+				'en' => '/en/service/',
+				'ru' => '/ru/service/',
+			],
 		];
 
 		// Адаптируем ключи под реальные слаги языков Polylang (например, ua -> uk)
@@ -186,6 +207,7 @@ final class StringsManager {
 			// Запись в БД только в админке: на фронтенде (page cache, высокий RPS) пресеты отдаются из памяти без INSERT.
 			if ( is_admin() ) {
 				update_option( self::OPTION_NAME, $defaults, true );
+				update_option( self::SEED_FOOTER_OPTION, '1', true );
 			}
 			self::$strings_cache = $defaults;
 
@@ -204,6 +226,27 @@ final class StringsManager {
 				if ( '' !== $clean_lang ) {
 					$clean[ $clean_key ][ $clean_lang ] = (string) $val;
 				}
+			}
+		}
+
+		// Мягкое однократное неразрушающее слияние (non-destructive merge) новых предустановленных ключей подвала
+		if ( ! get_option( self::SEED_FOOTER_OPTION, false ) ) {
+			$defaults    = self::get_default_presets();
+			$footer_keys = [ 'privacy_text', 'privacy_url', 'service_text', 'service_url' ];
+			$updated     = false;
+
+			foreach ( $footer_keys as $f_key ) {
+				if ( ! array_key_exists( $f_key, $clean ) && isset( $defaults[ $f_key ] ) ) {
+					$clean[ $f_key ] = $defaults[ $f_key ];
+					$updated         = true;
+				}
+			}
+
+			if ( is_admin() ) {
+				if ( $updated ) {
+					update_option( self::OPTION_NAME, $clean, true );
+				}
+				update_option( self::SEED_FOOTER_OPTION, '1', true );
 			}
 		}
 
@@ -434,7 +477,13 @@ final class StringsManager {
 	 * @return mixed
 	 */
 	public static function process_divi_shortcodes( mixed $output ): mixed {
-		if ( ! is_string( $output ) || ( ! str_contains( $output, '[plu_' ) && ! str_contains( $output, '[scat_pagination' ) ) ) {
+		if ( ! is_string( $output ) || '' === $output ) {
+			return $output;
+		}
+
+		$output = self::expand_encoded_plu_str_in_html( $output );
+
+		if ( ! str_contains( $output, '[plu_' ) && ! str_contains( $output, '[scat_pagination' ) ) {
 			return $output;
 		}
 
@@ -443,8 +492,8 @@ final class StringsManager {
 
 	/**
 	 * Обработка вывода блоков Divi 5 (фильтр render_block, приоритет 12):
-	 * 1) Раскрывает нераскрытые динамические плейсхолдеры $variable(...plu_str_...)$ на страницах Архивов / Категорий / Поиска (где post_id = 0 или null).
-	 * 2) Раскрывает шорткоды [plu_str ...] и [plu_date ...], если они не были обработаны ранее.
+	 * 1) Раскрывает нераскрытые динамические плейсхолдеры $variable(...plu_str_...)$ (включая URL-encoded варианты в href) на страницах Архивов / Категорий / Поиска / Подвала.
+	 * 2) Раскрывает шорткоды [plu_str ...] (включая экранированные квадратные скобки и кавычки в атрибутах href модулей Link / Button) и [plu_date ...].
 	 *
 	 * @param mixed $block_content HTML-вывод блока.
 	 * @param mixed $block         Массив данных блока Gutenberg / Divi 5.
@@ -455,16 +504,19 @@ final class StringsManager {
 			return $block_content;
 		}
 
-		if ( str_contains( $block_content, '$variable(' ) && str_contains( $block_content, self::META_PREFIX ) ) {
+		if (
+			( str_contains( $block_content, '$variable(' ) || str_contains( $block_content, '%24variable' ) )
+			&& str_contains( $block_content, self::META_PREFIX )
+		) {
 			$replaced = preg_replace_callback(
-				'/\$variable\((?:[^$]|\$(?!\)))*?plu_str_([a-z0-9_]+)(?:[^$]|\$(?!\)))*?\)\$/i',
+				'/(?:https?:\/\/)?(?:\$variable\(|%24variable(?:%28|\())(?:[^$%]|\$(?!\))|%(?!29%24))*?plu_str_([a-z0-9_]+)(?:[^$%]|\$(?!\))|%(?!29%24))*?(?:\)\$|%29%24|\)%24|%29\$)/i',
 				static function ( array $matches ): string {
 					$str_id = self::sanitize_string_id( (string) $matches[1] );
 					if ( '' === $str_id ) {
 						return $matches[0];
 					}
 					$translated = self::get_string( $str_id );
-					return '' !== $translated ? esc_html( $translated ) : $matches[0];
+					return '' !== $translated ? esc_attr( $translated ) : $matches[0];
 				},
 				$block_content
 			);
@@ -474,11 +526,42 @@ final class StringsManager {
 			}
 		}
 
+		$block_content = self::expand_encoded_plu_str_in_html( $block_content );
+
 		if ( str_contains( $block_content, '[plu_' ) || str_contains( $block_content, '[scat_pagination' ) ) {
 			$block_content = do_shortcode( $block_content );
 		}
 
 		return $block_content;
+	}
+
+	/**
+	 * Раскрывает шорткоды [plu_str id="..."], в которых Divi 5 / esc_url / esc_attr экранировал
+	 * квадратные скобки (%5B/%5D, &#91;/&#93;), кавычки (&quot;, &#039;, %22) или добавил префикс http(s):// внутри href.
+	 *
+	 * @param string $html HTML-фрагмент блока или модуля.
+	 * @return string
+	 */
+	private static function expand_encoded_plu_str_in_html( string $html ): string {
+		if ( ! str_contains( $html, 'plu_str' ) ) {
+			return $html;
+		}
+
+		// 1. Прямое раскрытие [plu_str id="..."] в любых вариациях экранирования (в т.ч. внутри href="http://[plu_str...]" или href="%5Bplu_str...%5D")
+		$replaced = preg_replace_callback(
+			'/(?:https?:\/\/)?(?:\[|%5B|&#0*91;|&#x0*5B;)plu_str(?:\s|%20|\+)+id\s*=\s*(?:["\']|&quot;|&#0*39;|&#0*34;|%22|%27)?([a-z0-9_-]+)(?:["\']|&quot;|&#0*39;|&#0*34;|%22|%27)?[^\]%]*?(?:\]|%5D|&#0*93;|&#x0*5D;)/i',
+			static function ( array $matches ): string {
+				$str_id = self::sanitize_string_id( (string) $matches[1] );
+				if ( '' === $str_id ) {
+					return $matches[0];
+				}
+				$translated = self::get_string( $str_id );
+				return '' !== $translated ? esc_attr( $translated ) : $matches[0];
+			},
+			$html
+		);
+
+		return is_string( $replaced ) ? $replaced : $html;
 	}
 
 	/**
@@ -776,6 +859,7 @@ final class StringsManager {
 		}
 
 		update_option( self::OPTION_NAME, $clean_strings, true );
+		update_option( self::SEED_FOOTER_OPTION, '1', true );
 		self::$strings_cache = $clean_strings;
 
 		// Обновляем регистрацию строк в Polylang
