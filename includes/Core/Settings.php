@@ -892,7 +892,43 @@ final class Settings {
 
         $raw_models = is_array( $data['models'] ?? null ) ? $data['models'] : [];
         $models     = [];
-        $excluded   = [ 'embedding', 'imagen', 'veo', 'audio', 'tts', 'aqa' ];
+        $excluded   = [
+            'image',
+            'banana',
+            'lyria',
+            'robotics',
+            'computer-use',
+            'deep-research',
+            'transcribe',
+            'antigravity',
+            'clip',
+            'embedding',
+            'aqa',
+            'tts',
+            'audio',
+            'video',
+            'veo',
+            'imagen',
+            'learnlm',
+        ];
+        $recommended_ids = [
+            'gemini-4-hydrogen',
+            'gemini-3.8-flash',
+            'gemini-3.5-flash',
+            'gemini-2.5-flash',
+        ];
+        $priority_order = [
+            'gemini-4-hydrogen'    => 1,
+            'gemini-3.8-flash'     => 2,
+            'gemini-3.7-flash'     => 3,
+            'gemini-3.6-flash'     => 4,
+            'gemini-3.5-flash'     => 5,
+            'gemini-3.5-flash-lite' => 6,
+            'gemini-2.5-flash'     => 7,
+            'gemini-2.5-flash-lite' => 8,
+            'gemini-4-argon'       => 9,
+            'gemini-2.5-pro'       => 10,
+        ];
 
         foreach ( $raw_models as $item ) {
             if ( ! is_array( $item ) || empty( $item['name'] ) ) {
@@ -924,6 +960,7 @@ final class Settings {
                 'id'              => $clean_id,
                 'displayName'     => $display_name,
                 'inputTokenLimit' => (int) ( $item['inputTokenLimit'] ?? 0 ),
+                'recommended'     => in_array( $clean_id, $recommended_ids, true ),
             ];
         }
 
@@ -932,6 +969,18 @@ final class Settings {
                 'message' => __( 'Не найдено ни одной текстовой модели с поддержкой generateContent для данного ключа.', 'polyland-up' ),
             ] );
         }
+
+        usort(
+            $models,
+            static function ( array $a, array $b ) use ( $priority_order ): int {
+                $pa = $priority_order[ $a['id'] ] ?? 999;
+                $pb = $priority_order[ $b['id'] ] ?? 999;
+                if ( $pa !== $pb ) {
+                    return $pa <=> $pb;
+                }
+                return strcmp( $a['id'], $b['id'] );
+            }
+        );
 
         wp_send_json_success( [
             'models' => $models,
@@ -1077,7 +1126,8 @@ final class Settings {
             );
         } elseif ( 429 === $code || 'RESOURCE_EXHAUSTED' === $error_status ) {
             $desc = sprintf(
-                __( 'Превышен лимит запросов (HTTP 429): %s', 'polyland-up' ),
+                __( 'Временно исчерпан лимит запросов (HTTP 429) для модели %1$s: на бесплатном тарифе Google AI Studio действует минутный лимит (RPM, сбрасывается через 60 сек) и суточный лимит (RPD). При реальном переводе статей плагин автоматически переключится на резервную Flash-модель с доступной квотой — либо выберите другую модель со звёздочкой ★ выше. Детали API: %2$s', 'polyland-up' ),
+                $clean_model,
                 $error_message
             );
         } else {

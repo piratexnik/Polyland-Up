@@ -169,16 +169,21 @@
                             }
 
                             // Отрисовываем кликабельные чипсы
+                            const topModels = ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
                             const chipsHtml = models.map(function(m) {
                                 const isActive = (m.id === currentVal) ? ' is-active' : '';
+                                const isRecommended = Boolean(m.recommended) || topModels.indexOf(m.id) !== -1;
+                                const starBadge = isRecommended ? ' <span class="plu-model-star" title="Рекомендуемая модель для перевода">&#9733;</span>' : '';
                                 const limitStr = m.inputTokenLimit ? ` (${Math.round(m.inputTokenLimit / 1000)}K tokens)` : '';
-                                const titleAttr = `${m.displayName || m.id}${limitStr}`;
-                                return `<button type="button" class="plu-model-chip${isActive}" data-model="${esc(m.id)}" title="${esc(titleAttr)}">${esc(m.id)}</button>`;
+                                const recNote = isRecommended ? ' — Рекомендуемая модель. При лимите 429 плагин автоматически страхует перевод резервными моделями из этого списка.' : '';
+                                const titleAttr = `${m.displayName || m.id}${limitStr}${recNote}`;
+                                return `<button type="button" class="plu-model-chip${isActive}${isRecommended ? ' is-recommended' : ''}" data-model="${esc(m.id)}" title="${esc(titleAttr)}">${esc(m.id)}${starBadge}</button>`;
                             }).join('');
 
                             $modelsResult.html(`
-                                <div class="plu-models-chips-header">Найдено моделей: <strong>${esc(models.length)}</strong> (кликните для выбора):</div>
+                                <div class="plu-models-chips-header">Найдено текстовых моделей: <strong>${esc(models.length)}</strong> (кликните для выбора):</div>
                                 <div class="plu-models-chips">${chipsHtml}</div>
+                                <p class="description" style="margin-top:6px;">&#9733; Топ-модели для перевода. При достижении минутного лимита (HTTP 429) плагин автоматически переключается на резервные модели из этого списка.</p>
                             `);
                         } else {
                             const msg = (response.data && response.data.message) ? response.data.message : 'Не удалось загрузить модели.';

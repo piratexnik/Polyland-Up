@@ -1,6 +1,6 @@
 # Технический паспорт: Polylang Divi 5 AI Auto-Translator & Same Slug
 
-> Единственный источник истины для продолжения разработки в новой сессии. Версия документа соответствует релизу `v4.3` (предустановленные UI-строки ссылок подвала с неразрушающим слиянием).
+> Единственный источник истины для продолжения разработки в новой сессии. Версия документа соответствует релизу `v4.4` (умный каскад моделей Gemini при 429/503/404, укрупнённые чанки и очистка селектора моделей).
 
 ## 1. Общие сведения
 - **Название:** Polylang Divi 5 AI Auto-Translator & Same Slug
@@ -9,7 +9,7 @@
 - **Пространство имен (Namespace):** `PolylangUp\` (директория `includes/`)
 - **Префикс функций и опций:** `plu_`
 - **Префикс констант:** `PLU_`
-- **Текущая версия:** `4.3`
+- **Текущая версия:** `4.4`
 - **Минимальная версия PHP:** `8.1`
 - **Минимальная версия WordPress:** `6.5`
 - **Репозиторий GitHub:** `https://github.com/piratexnik/Polyland-Up`
@@ -45,7 +45,7 @@ Polyland-Up/
 ```
 
 ### Константы плагина
-- `PLU_VERSION` — '4.3'
+- `PLU_VERSION` — '4.4'
 - `PLU_FILE` — абсолютный путь к `Polyland-Up.php`
 - `PLU_PATH` — путь к корневой папке плагина с завершающим слешем
 - `PLU_URL` — URL к корневой папке плагина с завершающим слешем
@@ -356,7 +356,7 @@ if ( function_exists( 'plu_is_translator_ready' ) && plu_is_translator_ready() )
 
 Nonce-действия: `plu_admin_nonce` (Settings/Strings/Menu/Bulk), `plu_clone_nonce` (метабокс), `plu_force_check_update` (Updater).
 
-## 19. Карта классов и методов (сгенерировано из кода v4.3)
+## 19. Карта классов и методов (сгенерировано из кода v4.4)
 ### `Polyland-Up.php`
 - **public:** `plu_get_option`, `plu_is_translator_ready`, `plu_translate_dictionary`, `plu_get_translator_last_stats`
 - **private:** —
@@ -407,7 +407,7 @@ Nonce-действия: `plu_admin_nonce` (Settings/Strings/Menu/Bulk), `plu_clo
 
 ### `includes/Modules/TranslatorAPI.php`
 - **public:** `get_last_stats`, `translate`, `normalize_lang_code`, `translate_via_gtx`, `protect_special_tokens`, `restore_special_tokens`, `translate_via_gemini`, `decode_gemini_json`
-- **private:** `request_google_batch`
+- **private:** `request_google_batch`, `request_gemini_chunk`
 
 
 ### Ключевые статические свойства

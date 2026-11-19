@@ -147,14 +147,14 @@ final class StringsManager {
 				'ru' => '/ru/privacy-policy/',
 			],
 			'service_text' => [
-				'uk' => 'Сервісні центри',
-				'en' => 'Service Centers',
-				'ru' => 'Сервисные центры',
+				'uk' => 'Умови використання',
+				'en' => 'Terms of Service',
+				'ru' => 'Условия использования',
 			],
 			'service_url' => [
-				'uk' => '/service/',
-				'en' => '/en/service/',
-				'ru' => '/ru/service/',
+				'uk' => '/terms-of-service/',
+				'en' => '/en/terms-of-service/',
+				'ru' => '/ru/terms-of-service/',
 			],
 		];
 

@@ -58,6 +58,7 @@ final class TranslatorAPI {
         self::$last_stats = [
             'engine'           => $engine,
             'provider_label'   => 'gemini' === $engine ? 'Google Gemini AI' : 'Google GTX',
+            'fallback_used'    => '',
             'translated_count' => 0,
             'total_count'      => count( $dictionary ),
             'time_ms'          => 0,
@@ -449,7 +450,9 @@ final class TranslatorAPI {
     }
 
     /**
-     * Провайдер 2: Нейросетевой пакетный перевод через Google Gemini API (чанки по 90 элементов).
+     * Провайдер 2: Нейросетевой пакетный перевод через Google Gemini API
+     * (чанки до 160 элементов / ~18 000 символов, пауза 2 сек между чанками,
+     * автоматический каскад резервных моделей при 429/503/404 и страховка Google GTX).
      *
      * @param array<string, string> $dictionary           Словарь исходных строк.
      * @param string                $sl                   Нормализованный код исходного языка.
@@ -497,98 +500,109 @@ final class TranslatorAPI {
         );
         $full_system_instruction = implode( "\n\n", $prompt_parts );
 
-        $endpoint            = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( $model ) . ':generateContent';
-        $chunks              = array_chunk( $dictionary, 90, true );
-        $result              = [];
-        $use_thinking_config = ( stripos( $model, 'flash' ) !== false || stripos( $model, 'hydrogen' ) !== false );
+        // Формируем чанки: до 160 элементов и до ~18 000 символов суммарного текста
+        $max_chunk_items = 160;
+        $max_chunk_chars = 18000;
+        $chunks          = [];
+        $current_chunk   = [];
+        $current_chars   = 0;
 
-        foreach ( $chunks as $chunk ) {
-            $generation_config = [
-                'responseMimeType' => 'application/json',
-                'temperature'      => 0.1,
-            ];
+        foreach ( $dictionary as $key => $val ) {
+            $item_chars = mb_strlen( (string) $val, 'UTF-8' );
+            if (
+                ! empty( $current_chunk ) &&
+                ( count( $current_chunk ) >= $max_chunk_items || ( $current_chars + $item_chars ) > $max_chunk_chars )
+            ) {
+                $chunks[]      = $current_chunk;
+                $current_chunk = [];
+                $current_chars = 0;
+            }
+            $current_chunk[ $key ] = $val;
+            $current_chars        += $item_chars;
+        }
+        if ( ! empty( $current_chunk ) ) {
+            $chunks[] = $current_chunk;
+        }
 
-            if ( $use_thinking_config ) {
-                $generation_config['thinkingConfig'] = [
-                    'thinkingBudget' => 0,
-                ];
+        $cascade_pool = [
+            'gemini-4-hydrogen',
+            'gemini-3.8-flash',
+            'gemini-3.5-flash',
+            'gemini-2.5-flash',
+            'gemini-2.5-flash-lite',
+            'gemini-flash-latest',
+        ];
+
+        $active_model  = $model;
+        $failed_models = [];
+        $result        = [];
+        $total_chunks  = count( $chunks );
+
+        foreach ( $chunks as $chunk_idx => $chunk ) {
+            // Мягкая пауза 2 секунды между чанками для предотвращения Burst RPM Rate Limit
+            if ( $total_chunks > 1 && $chunk_idx > 0 ) {
+                usleep( 2000000 );
             }
 
-            $payload = [
-                'systemInstruction' => [
-                    'parts' => [
-                        [ 'text' => $full_system_instruction ],
-                    ],
-                ],
-                'contents' => [
-                    [
-                        'role'  => 'user',
-                        'parts' => [
-                            [ 'text' => (string) wp_json_encode( (object) $chunk, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) ],
-                        ],
-                    ],
-                ],
-                'generationConfig' => $generation_config,
-            ];
+            $attempt = self::request_gemini_chunk( $active_model, $api_key, $full_system_instruction, $chunk );
 
-            $request_args = [
-                'timeout' => 90,
-                'headers' => [
-                    'Content-Type'   => 'application/json',
-                    'x-goog-api-key' => $api_key,
-                ],
-                'body'    => (string) wp_json_encode( $payload ),
-            ];
+            // Умный каскад моделей при 429 (Rate Limit), 503 (Overloaded) или 404 (Unavailable)
+            if ( ! $attempt['success'] && in_array( $attempt['code'], [ 429, 503, 404 ], true ) ) {
+                $failed_models[ $active_model ] = true;
+                $backup_succeeded               = false;
 
-            $response = wp_remote_post( $endpoint, $request_args );
+                foreach ( $cascade_pool as $backup_model ) {
+                    if ( isset( $failed_models[ $backup_model ] ) ) {
+                        continue;
+                    }
 
-            // Страховка: если модель не поддерживает thinkingConfig (HTTP 400), повторяем без него
-            if (
-                $use_thinking_config &&
-                ! is_wp_error( $response ) &&
-                400 === (int) wp_remote_retrieve_response_code( $response )
-            ) {
-                $err_body = (string) wp_remote_retrieve_body( $response );
-                if ( stripos( $err_body, 'thinkingConfig' ) !== false || stripos( $err_body, 'thinking' ) !== false ) {
-                    $use_thinking_config = false;
-                    unset( $payload['generationConfig']['thinkingConfig'] );
-                    $request_args['body'] = (string) wp_json_encode( $payload );
-                    $response             = wp_remote_post( $endpoint, $request_args );
+                    usleep( 2000000 );
+                    $backup_attempt = self::request_gemini_chunk( $backup_model, $api_key, $full_system_instruction, $chunk );
+
+                    if ( $backup_attempt['success'] ) {
+                        $active_model                       = $backup_model;
+                        $attempt                            = $backup_attempt;
+                        $backup_succeeded                   = true;
+                        self::$last_stats['fallback_used']  = $backup_model;
+                        self::$last_stats['provider_label'] = 'Gemini ' . $backup_model . ' (Fallback)';
+                        break;
+                    }
+
+                    if ( in_array( $backup_attempt['code'], [ 429, 503, 404 ], true ) ) {
+                        $failed_models[ $backup_model ] = true;
+                    }
+                    $attempt = $backup_attempt;
+                }
+
+                // Страховка последнего рубежа: если все модели Gemini вернули 429/503/404, допереводим чанк через Google GTX
+                if ( ! $backup_succeeded && in_array( $attempt['code'], [ 429, 503, 404 ], true ) ) {
+                    $gtx_chunk = self::translate_via_gtx( $chunk, $sl, $tl );
+                    if ( ! is_wp_error( $gtx_chunk ) && ! empty( $gtx_chunk ) ) {
+                        self::$last_stats['fallback_used']  = 'Google GTX';
+                        self::$last_stats['provider_label'] = 'Gemini -> Google GTX (Fallback)';
+                        foreach ( $chunk as $k => $orig ) {
+                            $result[ $k ] = $gtx_chunk[ $k ] ?? $orig;
+                        }
+                        continue;
+                    }
                 }
             }
 
-            // Повторная попытка при временной ошибке 429 / 503
-            if ( ! is_wp_error( $response ) && in_array( (int) wp_remote_retrieve_response_code( $response ), [ 429, 503 ], true ) ) {
-                sleep( 2 );
-                $response = wp_remote_post( $endpoint, $request_args );
-            }
-
-            if ( is_wp_error( $response ) ) {
-                return new \WP_Error(
-                    'plu_gemini_network_error',
-                    sprintf( __( 'Сетевая ошибка Gemini API: %s', 'polyland-up' ), $response->get_error_message() )
-                );
-            }
-
-            $code     = (int) wp_remote_retrieve_response_code( $response );
-            $raw_body = (string) wp_remote_retrieve_body( $response );
-            $data     = json_decode( $raw_body, true );
-
-            if ( 200 !== $code ) {
-                $err_msg = is_array( $data ) ? (string) ( $data['error']['message'] ?? '' ) : '';
+            if ( ! $attempt['success'] ) {
+                if ( $attempt['wp_error'] instanceof \WP_Error ) {
+                    return $attempt['wp_error'];
+                }
                 return new \WP_Error(
                     'plu_gemini_http_error',
                     sprintf(
                         __( 'Ошибка Gemini API (HTTP %1$d): %2$s', 'polyland-up' ),
-                        $code,
-                        '' !== $err_msg ? $err_msg : __( 'Неизвестный ответ сервера.', 'polyland-up' )
+                        $attempt['code'],
+                        '' !== $attempt['error_message'] ? $attempt['error_message'] : __( 'Неизвестный ответ сервера.', 'polyland-up' )
                     )
                 );
             }
 
-            $candidate_text = $data['candidates'][0]['content']['parts'][0]['text'] ?? '';
-            $decoded_chunk  = self::decode_gemini_json( (string) $candidate_text );
-
+            $decoded_chunk = $attempt['decoded'];
             if ( ! is_array( $decoded_chunk ) ) {
                 // Фоллбэк: если модель вернула невалидный JSON, оставляем оригиналы чанка без поломки верстки
                 foreach ( $chunk as $k => $orig ) {
@@ -607,6 +621,116 @@ final class TranslatorAPI {
         }
 
         return $result;
+    }
+
+    /**
+     * Выполняет одиночный запрос к конкретной модели Gemini API для одного чанка словаря.
+     *
+     * @param string                $model                   Имя модели.
+     * @param string                $api_key                 API-ключ Google AI Studio.
+     * @param string                $full_system_instruction Системный промпт.
+     * @param array<string, string> $chunk                   Чанк словаря.
+     * @return array{success: bool, code: int, error_message: string, decoded: array<string, mixed>|null, wp_error: \WP_Error|null}
+     */
+    private static function request_gemini_chunk(
+        string $model,
+        string $api_key,
+        string $full_system_instruction,
+        array $chunk
+    ): array {
+        $endpoint            = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode( $model ) . ':generateContent';
+        $use_thinking_config = ( stripos( $model, 'flash' ) !== false || stripos( $model, 'hydrogen' ) !== false );
+
+        $generation_config = [
+            'responseMimeType' => 'application/json',
+            'temperature'      => 0.1,
+        ];
+
+        if ( $use_thinking_config ) {
+            $generation_config['thinkingConfig'] = [
+                'thinkingBudget' => 0,
+            ];
+        }
+
+        $payload = [
+            'systemInstruction' => [
+                'parts' => [
+                    [ 'text' => $full_system_instruction ],
+                ],
+            ],
+            'contents' => [
+                [
+                    'role'  => 'user',
+                    'parts' => [
+                        [ 'text' => (string) wp_json_encode( (object) $chunk, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) ],
+                    ],
+                ],
+            ],
+            'generationConfig' => $generation_config,
+        ];
+
+        $request_args = [
+            'timeout' => 90,
+            'headers' => [
+                'Content-Type'   => 'application/json',
+                'x-goog-api-key' => $api_key,
+            ],
+            'body'    => (string) wp_json_encode( $payload ),
+        ];
+
+        $response = wp_remote_post( $endpoint, $request_args );
+
+        // Страховка: если модель не поддерживает thinkingConfig (HTTP 400), повторяем без него
+        if (
+            $use_thinking_config &&
+            ! is_wp_error( $response ) &&
+            400 === (int) wp_remote_retrieve_response_code( $response )
+        ) {
+            $err_body = (string) wp_remote_retrieve_body( $response );
+            if ( stripos( $err_body, 'thinkingConfig' ) !== false || stripos( $err_body, 'thinking' ) !== false ) {
+                unset( $payload['generationConfig']['thinkingConfig'] );
+                $request_args['body'] = (string) wp_json_encode( $payload );
+                $response             = wp_remote_post( $endpoint, $request_args );
+            }
+        }
+
+        if ( is_wp_error( $response ) ) {
+            return [
+                'success'       => false,
+                'code'          => 0,
+                'error_message' => $response->get_error_message(),
+                'decoded'       => null,
+                'wp_error'      => new \WP_Error(
+                    'plu_gemini_network_error',
+                    sprintf( __( 'Сетевая ошибка Gemini API: %s', 'polyland-up' ), $response->get_error_message() )
+                ),
+            ];
+        }
+
+        $code     = (int) wp_remote_retrieve_response_code( $response );
+        $raw_body = (string) wp_remote_retrieve_body( $response );
+        $data     = json_decode( $raw_body, true );
+
+        if ( 200 !== $code ) {
+            $err_msg = is_array( $data ) ? (string) ( $data['error']['message'] ?? '' ) : '';
+            return [
+                'success'       => false,
+                'code'          => $code,
+                'error_message' => $err_msg,
+                'decoded'       => null,
+                'wp_error'      => null,
+            ];
+        }
+
+        $candidate_text = $data['candidates'][0]['content']['parts'][0]['text'] ?? '';
+
+        return [
+            'success'       => true,
+            'code'          => 200,
+            'error_message' => '',
+            'decoded'       => self::decode_gemini_json( (string) $candidate_text ),
+            'wp_error'      => null,
+        ];
     }
 
     /**
